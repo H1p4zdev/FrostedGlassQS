@@ -1,12 +1,18 @@
 package com.lunaris.frostedglass
 
+import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
+import android.os.Build
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -130,10 +136,53 @@ object TileBlurHook {
         XposedBridge.log("$TAG: WARNING - No panel hooks succeeded!")
     }
 
-    // ==================== POWER MENU ====================
+    // ========================================================================
+    // POWER MENU — OEM Redesign (HyperOS / iOS / ColorOS style)
+    // ========================================================================
 
     fun hookPowerMenu(classLoader: ClassLoader) {
-        // Hook GlobalActionsLayoutLite.onLayout to style buttons
+        // Hook initializeLayout for window-level blur + dim
+        try {
+            val dialogClass = XposedHelpers.findClass(
+                "com.android.systemui.globalactions.GlobalActionsDialogLite\$ActionsDialogLite",
+                classLoader
+            )
+            XposedHelpers.findAndHookMethod(
+                dialogClass, "initializeLayout",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val settings = readSettings()
+                        if (!settings.enabled || !settings.powerMenu) return
+                        try {
+                            val dialog = param.thisObject
+                            val getWindow = dialog.javaClass.getMethod("getWindow")
+                            val window = getWindow.invoke(dialog) as? Window ?: return
+
+                            // Heavy blur behind (like iOS)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                                window.attributes.blurBehindRadius = 120
+                            }
+
+                            // Dark dim
+                            window.setDimAmount(0.7f)
+
+                            // Transparent window background (removes ScrimDrawable)
+                            window.setBackgroundDrawable(null)
+
+                            XposedBridge.log("$TAG: Power menu OEM window setup done")
+                        } catch (e: Throwable) {
+                            XposedBridge.log("$TAG: Power menu window error: ${e.message}")
+                        }
+                    }
+                }
+            )
+            XposedBridge.log("$TAG: Hooked GlobalActionsDialogLite.initializeLayout()")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG: Power menu dialog hook failed: ${e.message}")
+        }
+
+        // Hook onLayout for card + item restyling
         try {
             val layoutClass = XposedHelpers.findClass(
                 "com.android.systemui.globalactions.GlobalActionsLayoutLite", classLoader
@@ -149,8 +198,8 @@ object TileBlurHook {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val settings = readSettings()
                         if (!settings.enabled || !settings.powerMenu) return
-                        val layout = param.thisObject as View
-                        applyPowerMenuEffect(layout, settings)
+                        val layout = param.thisObject as ViewGroup
+                        applyPowerMenuOemStyle(layout, settings)
                     }
                 }
             )
@@ -158,69 +207,110 @@ object TileBlurHook {
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: Power menu layout hook failed: ${e.message}")
         }
-
-        // Hook GlobalActionsDialogLite to modify window blur
-        try {
-            val dialogClass = XposedHelpers.findClass(
-                "com.android.systemui.globalactions.GlobalActionsDialogLite\$ActionsDialogLite",
-                classLoader
-            )
-            XposedHelpers.findAndHookMethod(
-                dialogClass, "initializeLayout",
-                object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        val settings = readSettings()
-                        if (!settings.enabled || !settings.powerMenu) return
-                        try {
-                            val dialog = param.thisObject
-                            val getWindowMethod = dialog.javaClass.getMethod("getWindow")
-                            val window = getWindowMethod.invoke(dialog) as? Window ?: return
-                            val attrs = window.attributes
-                            attrs.blurBehindRadius = settings.blurRadius * 3
-                            window.setDimAmount(0.3f)
-                            window.attributes = attrs
-                            XposedBridge.log("$TAG: Power menu blur radius set to ${settings.blurRadius * 3}")
-                        } catch (e: Throwable) {
-                            XposedBridge.log("$TAG: Power menu window blur error: ${e.message}")
-                        }
-                    }
-                }
-            )
-            XposedBridge.log("$TAG: Hooked GlobalActionsDialogLite.initializeLayout()")
-        } catch (e: Throwable) {
-            XposedBridge.log("$TAG: Power menu dialog hook failed: ${e.message}")
-        }
     }
 
-    private fun applyPowerMenuEffect(layout: View, settings: FrostedSettings) {
+    private fun applyPowerMenuOemStyle(layout: ViewGroup, settings: FrostedSettings) {
         try {
             val density = layout.resources.displayMetrics.density
-            val opacity = settings.tileOpacity.toFloat() / 100f
-            val bgColor = ((255 * opacity).toInt() shl 24) or 0x1A1A2E
-            val cornerRadius = settings.cornerRadius * density
+            val cardBgColor = 0xE00F0F1E.toInt()  // dark glass card
+            val cardCorner = (36 * density).toInt()
 
-            walkViews(layout) { child ->
-                val className = child.javaClass.name
-                if (className.contains("GlobalActionsItem") || className.contains("global_actions")) {
-                    child.background = GradientDrawable().apply {
-                        shape = GradientDrawable.RECTANGLE
-                        setCornerRadius(cornerRadius)
-                        setColor(bgColor)
-                        setStroke((1 * density).toInt(), 0x20FFFFFF.toInt())
+            // Find the card container via getListView()
+            val listView = XposedHelpers.callMethod(layout, "getListView") as? ViewGroup ?: return
+
+            // === 1. CARD BACKGROUND ===
+            // Replace with dark glass card
+            listView.background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setCornerRadius(cardCorner.toFloat())
+                setColor(cardBgColor)
+            }
+            // Add internal padding for items
+            listView.setPadding(
+                (20 * density).toInt(),
+                (24 * density).toInt(),
+                (20 * density).toInt(),
+                (24 * density).toInt()
+            )
+
+            // === 2. STYLE EACH ACTION ITEM ===
+            val icons = arrayOf(
+                "ic_power", "ic_restart", "ic_screenshot", "ic_emergency",
+                "ic_lock", "ic_airplane", "ic_settings", "ic_user"
+            )
+
+            walkViews(listView) { child ->
+                if (child.javaClass.name.contains("GlobalActionsItem")) {
+                    val item = child as ViewGroup
+
+                    // Style the item container
+                    item.setPadding(
+                        (6 * density).toInt(), (6 * density).toInt(),
+                        (6 * density).toInt(), (6 * density).toInt()
+                    )
+                    item.setBackgroundColor(Color.TRANSPARENT)
+
+                    // Find icon + text
+                    val icon = item.findViewById<ImageView>(android.R.id.icon)
+                    val text = item.findViewById<TextView>(android.R.id.message)
+
+                    if (icon != null) {
+                        val iconSize = (52 * density).toInt()
+                        val iconCorner = (14 * density).toInt()
+
+                        // Assign a vibrant accent color based on item type
+                        val accentColor = when {
+                            text == null -> 0xFF6C63FF.toInt()
+                            text.text?.contains("off", true) == true -> 0xFFFF4B4B.toInt()
+                            text.text?.contains("restart", true) == true -> 0xFF4CAF50.toInt()
+                            text.text?.contains("screenshot", true) == true -> 0xFF2196F3.toInt()
+                            text.text?.contains("emergency", true) == true -> 0xFFFF9800.toInt()
+                            else -> 0xFF6C63FF.toInt()
+                        }
+
+                        // Modern glass button background
+                        icon.background = GradientDrawable().apply {
+                            shape = GradientDrawable.RECTANGLE
+                            setCornerRadius(iconCorner.toFloat())
+                            setColor(accentColor and 0x66FFFFFF.toInt() or 0x22000000.toInt())
+                        }
+
+                        // Larger icon, white tinted
+                        icon.layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                            gravity = Gravity.CENTER_HORIZONTAL
+                            bottomMargin = (4 * density).toInt()
+                        }
+                        icon.setPadding(
+                            (14 * density).toInt(), (14 * density).toInt(),
+                            (14 * density).toInt(), (14 * density).toInt()
+                        )
+                        icon.setColorFilter(Color.WHITE)
+                        icon.scaleType = ImageView.ScaleType.CENTER_CROP
                     }
-                    XposedBridge.log("$TAG: Power menu item styled")
+
+                    if (text != null) {
+                        text.setTextColor(Color.WHITE)
+                        text.textSize = 13f
+                        text.gravity = Gravity.CENTER
+                        text.ellipsize = null
+                        text.maxLines = 1
+                    }
+
+                    XposedBridge.log("$TAG: Power menu OEM-styled")
                 }
                 false
             }
+
+            XposedBridge.log("$TAG: Power menu OEM redesign applied")
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: Power menu effect error: ${e.message}")
+            XposedBridge.log("$TAG: Power menu OEM error: ${e.message}")
+            XposedBridge.log(e)
         }
     }
 
     // ==================== LOCKSCREEN ====================
 
     fun hookLockscreen(classLoader: ClassLoader) {
-        // Hook KeyguardStatusBarView.onFinishInflate
         try {
             val statusBarClass = XposedHelpers.findClass(
                 "com.android.systemui.statusbar.phone.KeyguardStatusBarView", classLoader
@@ -240,7 +330,6 @@ object TileBlurHook {
             XposedBridge.log("$TAG: Lockscreen header hook failed: ${e.message}")
         }
 
-        // Hook KeyguardIndicationArea (Kotlin class, use init block)
         try {
             val indicationClass = XposedHelpers.findClass(
                 "com.android.systemui.keyguard.ui.view.KeyguardIndicationArea", classLoader
@@ -260,7 +349,6 @@ object TileBlurHook {
             XposedBridge.log("$TAG: Lockscreen footer hook failed: ${e.message}")
         }
 
-        // Also hook KeyguardRootView.onLayout for ongoing effects
         try {
             val rootClass = XposedHelpers.findClass(
                 "com.android.systemui.keyguard.ui.view.KeyguardRootView", classLoader
@@ -295,9 +383,7 @@ object TileBlurHook {
 
     private fun applyLockscreenHeaderEffect(view: View, settings: FrostedSettings) {
         try {
-            val density = view.resources.displayMetrics.density
-            val bgColor = 0x18FFFFFF
-            view.setBackgroundColor(bgColor)
+            view.setBackgroundColor(0x18FFFFFF.toInt())
             XposedBridge.log("$TAG: Lockscreen header styled")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: Lockscreen header error: ${e.message}")
@@ -397,7 +483,6 @@ object TileBlurHook {
                 }
             }
 
-            // Window blur
             if (settings.blurRadius > 0) {
                 try {
                     val viewClass = Class.forName("android.view.View")
