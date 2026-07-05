@@ -225,6 +225,7 @@ object TileBlurHook {
 
     private fun applyPowerMenuOemStyle(layout: ViewGroup, settings: FrostedSettings, moduleLoader: ClassLoader) {
         try {
+            ModuleRes.init(layout.context)
             val density = layout.resources.displayMetrics.density
 
             // Find the card container via getListView()
@@ -236,12 +237,22 @@ object TileBlurHook {
                 if (lgSuccess) {
                     XposedBridge.log("$TAG: LiquidGlassView applied to power menu via sibling overlay")
                 } else {
-                    // Fallback: XML drawable
-                    listView.background = ModuleRes.resources.getDrawable(R.drawable.power_menu_card_bg)
-                    XposedBridge.log("$TAG: LiquidGlassView failed, using XML drawable fallback")
+                    val bg = if (ModuleRes.isReady) ModuleRes.res.getDrawable(R.drawable.power_menu_card_bg)
+                    else GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        setCornerRadius(36 * density)
+                        setColor(0xE00F0F1E.toInt())
+                    }
+                    listView.background = bg
+                    XposedBridge.log("$TAG: LiquidGlassView failed, using drawable fallback")
                 }
             } else {
-                listView.background = ModuleRes.resources.getDrawable(R.drawable.power_menu_card_bg)
+                listView.background = if (ModuleRes.isReady) ModuleRes.res.getDrawable(R.drawable.power_menu_card_bg)
+                else GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setCornerRadius(36 * density)
+                    setColor(0xE00F0F1E.toInt())
+                }
             }
 
             // Add internal padding for items
@@ -270,7 +281,6 @@ object TileBlurHook {
 
                     if (icon != null) {
                         val iconSize = (52 * density).toInt()
-                        val iconCorner = (14 * density).toInt()
 
                         // Assign a vibrant accent color based on item type
                         val accentColor = when {
@@ -283,9 +293,17 @@ object TileBlurHook {
                         }
 
                         // Load base item drawable from XML and tint it
-                        val baseDrawable = ModuleRes.resources.getDrawable(R.drawable.power_menu_item_bg)
-                        baseDrawable.setTint(accentColor)
-                        icon.background = baseDrawable
+                        if (ModuleRes.isReady) {
+                            val baseDrawable = ModuleRes.res.getDrawable(R.drawable.power_menu_item_bg)
+                            baseDrawable.setTint(accentColor)
+                            icon.background = baseDrawable
+                        } else {
+                            icon.background = GradientDrawable().apply {
+                                shape = GradientDrawable.RECTANGLE
+                                setCornerRadius(14 * density)
+                                setColor(accentColor and 0x66FFFFFF.toInt() or 0x22000000.toInt())
+                            }
+                        }
 
                         // Larger icon, white tinted
                         icon.layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
@@ -395,13 +413,13 @@ object TileBlurHook {
 
     private fun applyLockscreenHeaderEffect(view: View, settings: FrostedSettings) {
         try {
-            if (view is ViewGroup) {
-                view.background = ModuleRes.resources.getDrawable(R.drawable.lockscreen_header_bg)
-                XposedBridge.log("$TAG: Lockscreen header styled via XML drawable")
+            ModuleRes.init(view.context)
+            if (ModuleRes.isReady) {
+                view.background = ModuleRes.res.getDrawable(R.drawable.lockscreen_header_bg)
             } else {
                 view.setBackgroundColor(0x18FFFFFF.toInt())
-                XposedBridge.log("$TAG: Lockscreen header styled (fallback)")
             }
+            XposedBridge.log("$TAG: Lockscreen header styled")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: Lockscreen header error: ${e.message}")
         }
@@ -409,9 +427,9 @@ object TileBlurHook {
 
     private fun applyLockscreenFooterEffect(view: View, settings: FrostedSettings) {
         try {
-            if (view is ViewGroup) {
-                view.background = ModuleRes.resources.getDrawable(R.drawable.lockscreen_footer_bg)
-                XposedBridge.log("$TAG: Lockscreen footer styled via XML drawable")
+            ModuleRes.init(view.context)
+            if (ModuleRes.isReady) {
+                view.background = ModuleRes.res.getDrawable(R.drawable.lockscreen_footer_bg)
             } else {
                 val density = view.resources.displayMetrics.density
                 val opacity = settings.tileOpacity.toFloat() / 100f
@@ -422,8 +440,8 @@ object TileBlurHook {
                     setCornerRadius(cornerRadius)
                     setColor(bgColor)
                 }
-                XposedBridge.log("$TAG: Lockscreen footer styled (fallback)")
             }
+            XposedBridge.log("$TAG: Lockscreen footer styled")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: Lockscreen footer error: ${e.message}")
         }
@@ -431,10 +449,10 @@ object TileBlurHook {
 
     private fun applyFrostedBackground(view: View, settings: FrostedSettings) {
         try {
-            view.background = ModuleRes.resources.getDrawable(R.drawable.lockscreen_ongoing_bg)
-            XposedBridge.log("$TAG: Lockscreen frosted background via XML drawable")
-        } catch (_: Throwable) {
-            try {
+            ModuleRes.init(view.context)
+            if (ModuleRes.isReady) {
+                view.background = ModuleRes.res.getDrawable(R.drawable.lockscreen_ongoing_bg)
+            } else {
                 val density = view.resources.displayMetrics.density
                 val bgColor = 0x10FFFFFF
                 val cornerRadius = settings.cornerRadius * density
@@ -443,8 +461,9 @@ object TileBlurHook {
                     setCornerRadius(cornerRadius)
                     setColor(bgColor)
                 }
-            } catch (_: Throwable) {}
-        }
+            }
+            XposedBridge.log("$TAG: Lockscreen frosted background styled")
+        } catch (_: Throwable) {}
     }
 
     // ==================== DIALOGS (stub — future use) ====================
