@@ -209,12 +209,9 @@ object TileBlurHook {
             // Window background blur
             if (settings.blurRadius > 0) {
                 try {
-                    val viewRootField = try {
-                        view.javaClass.getMethod("getViewRootImpl")
-                    } catch (_: Throwable) {
-                        Class.forName("android.view.View").getDeclaredField("mViewRootImpl").apply { isAccessible = true }
-                    }
-                    val viewRoot = viewRootField.invoke(view)
+                    val viewClass = Class.forName("android.view.View")
+                    val viewRootField = viewClass.getDeclaredField("mViewRootImpl").apply { isAccessible = true }
+                    val viewRoot = viewRootField.get(view)
                     if (viewRoot != null) {
                         val blurUtilsClass = XposedHelpers.findClass(
                             "com.android.systemui.statusbar.BlurUtils", view.context.classLoader
