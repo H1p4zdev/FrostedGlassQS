@@ -114,6 +114,7 @@ object TileBlurHook {
     }
 
     fun hookPanel(classLoader: ClassLoader) {
+        val moduleLoader = TileBlurHook::class.java.classLoader
         val candidates = listOf(
             "com.android.systemui.qs.QSPanel",
             "com.android.systemui.qs.QSPanelImpl",
@@ -134,8 +135,8 @@ object TileBlurHook {
                             val settings = readSettings()
                             if (!settings.enabled) return
                             val panel = param.thisObject as View
-                            applyPanelEffect(panel, settings)
-                            walkAndApplyTiles(panel, settings)
+                            applyPanelEffect(panel, settings, moduleLoader)
+                            walkAndApplyTiles(panel, settings, moduleLoader)
                         }
                     }
                 )
@@ -346,6 +347,8 @@ object TileBlurHook {
     // ==================== LOCKSCREEN ====================
 
     fun hookLockscreen(classLoader: ClassLoader) {
+        val moduleLoader = TileBlurHook::class.java.classLoader
+
         try {
             val statusBarClass = XposedHelpers.findClass(
                 "com.android.systemui.statusbar.phone.KeyguardStatusBarView", classLoader
@@ -356,7 +359,7 @@ object TileBlurHook {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val settings = readSettings()
                         if (!settings.enabled || !settings.lockscreen) return
-                        applyLockscreenHeaderEffect(param.thisObject as View, settings)
+                        applyLockscreenHeaderEffect(param.thisObject as View, settings, moduleLoader)
                     }
                 }
             )
@@ -375,7 +378,7 @@ object TileBlurHook {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val settings = readSettings()
                         if (!settings.enabled || !settings.lockscreen) return
-                        applyLockscreenFooterEffect(param.thisObject as View, settings)
+                        applyLockscreenFooterEffect(param.thisObject as View, settings, moduleLoader)
                     }
                 }
             )
@@ -403,7 +406,7 @@ object TileBlurHook {
                         walkViews(root) { child ->
                             val cn = child.javaClass.name
                             if (cn.contains("KeyguardStatusBar") || cn.contains("IndicationArea")) {
-                                applyFrostedBackground(child, settings)
+                                applyFrostedBackground(child, settings, moduleLoader)
                             }
                             false
                         }
@@ -416,8 +419,11 @@ object TileBlurHook {
         }
     }
 
-    private fun applyLockscreenHeaderEffect(view: View, settings: FrostedSettings) {
+    private fun applyLockscreenHeaderEffect(view: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
         try {
+            if (settings.liquidGlass && view is ViewGroup) {
+                if (LiquidGlassHook.applyToSurface(view, settings, moduleLoader)) return
+            }
             view.setBackgroundColor(0x18FFFFFF.toInt())
             XposedBridge.log("$TAG: Lockscreen header styled")
         } catch (e: Throwable) {
@@ -425,8 +431,11 @@ object TileBlurHook {
         }
     }
 
-    private fun applyLockscreenFooterEffect(view: View, settings: FrostedSettings) {
+    private fun applyLockscreenFooterEffect(view: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
         try {
+            if (settings.liquidGlass && view is ViewGroup) {
+                if (LiquidGlassHook.applyToSurface(view, settings, moduleLoader)) return
+            }
             val density = view.resources.displayMetrics.density
             val opacity = settings.tileOpacity.toFloat() / 100f
             val bgColor = ((255 * opacity * 0.5f).toInt() shl 24) or 0x1A1A2E
@@ -443,8 +452,11 @@ object TileBlurHook {
         }
     }
 
-    private fun applyFrostedBackground(view: View, settings: FrostedSettings) {
+    private fun applyFrostedBackground(view: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
         try {
+            if (settings.liquidGlass && view is ViewGroup) {
+                if (LiquidGlassHook.applyToSurface(view, settings, moduleLoader)) return
+            }
             val density = view.resources.displayMetrics.density
             val bgColor = 0x10FFFFFF
             val cornerRadius = settings.cornerRadius * density
@@ -454,6 +466,34 @@ object TileBlurHook {
                 setColor(bgColor)
             }
         } catch (_: Throwable) {}
+    }
+
+    // ==================== DIALOGS ====================
+
+    fun hookDialogs(classLoader: ClassLoader) {
+        val moduleLoader = TileBlurHook::class.java.classLoader
+        try {
+            XposedHelpers.findAndHookMethod(
+                "android.app.Dialog", classLoader, "show",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        try {
+                            val dialog = param.thisObject
+                            val window = dialog.javaClass.getMethod("getWindow").invoke(dialog) as? Window ?: return
+                            val ctx = window.context ?: return
+                            if (ctx.packageName != "com.android.systemui") return
+                            val view = window.decorView as? ViewGroup ?: return
+                            val settings = readSettings()
+                            if (!settings.enabled || !settings.liquidGlass) return
+                            LiquidGlassHook.applyToSurface(view, settings, moduleLoader)
+                        } catch (_: Throwable) {}
+                    }
+                }
+            )
+            XposedBridge.log("$TAG: Hooked Dialog.show()")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG: Dialog hook failed: ${e.message}")
+        }
     }
 
     // ==================== SHARED UTILS ====================
@@ -467,23 +507,29 @@ object TileBlurHook {
         }
     }
 
-    private fun walkAndApplyTiles(view: View, settings: FrostedSettings) {
+    private fun walkAndApplyTiles(view: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
                 val child = view.getChildAt(i)
                 val className = child.javaClass.name
                 if (className.contains("QSTileView") || className.contains("TileView")) {
                     applyTileEffect(child, settings)
+                    if (settings.liquidGlass && child is ViewGroup) {
+                        LiquidGlassHook.applyToSurface(child, settings, moduleLoader)
+                    }
                 }
                 if (child is ViewGroup) {
-                    walkAndApplyTiles(child, settings)
+                    walkAndApplyTiles(child, settings, moduleLoader)
                 }
             }
         }
     }
 
-    private fun applyPanelEffect(panel: View, settings: FrostedSettings) {
+    private fun applyPanelEffect(panel: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
         if (!settings.panelBlur) return
+        if (settings.liquidGlass && panel is ViewGroup) {
+            if (LiquidGlassHook.applyToSurface(panel, settings, moduleLoader)) return
+        }
         try {
             panel.setBackgroundColor(0x08000000.toInt())
         } catch (_: Throwable) {}

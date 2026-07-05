@@ -1,6 +1,7 @@
 package com.lunaris.frostedglass
 
 import android.content.Context
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import de.robv.android.xposed.XposedBridge
@@ -9,21 +10,19 @@ object LiquidGlassHook {
 
     private const val TAG = "FrostedGlassQS"
 
-    fun applyToPowerMenu(
-        cardContainer: ViewGroup,
+    fun applyToSurface(
+        surface: View,
         settings: TileBlurHook.FrostedSettings,
         moduleLoader: ClassLoader
     ): Boolean {
+        if (!settings.liquidGlass) return false
         return try {
-            val context = cardContainer.context
+            val context = surface.context
             val density = context.resources.displayMetrics.density
 
             val lgClass = moduleLoader.loadClass("com.qmdeve.liquidglass.widget.LiquidGlassView")
-            XposedBridge.log("$TAG: LiquidGlassView class loaded")
-
             val constructor = lgClass.getConstructor(Context::class.java)
             val lgView = constructor.newInstance(context)
-            XposedBridge.log("$TAG: LiquidGlassView instance created")
 
             val bind = lgClass.getMethod("bind", ViewGroup::class.java)
             val setCornerRadius = lgClass.getMethod("setCornerRadius", Float::class.javaPrimitiveType!!)
@@ -35,7 +34,6 @@ object LiquidGlassHook {
             val setDraggable = lgClass.getMethod("setDraggableEnabled", Boolean::class.javaPrimitiveType!!)
             val setElastic = lgClass.getMethod("setElasticEnabled", Boolean::class.javaPrimitiveType!!)
             val setTouch = lgClass.getMethod("setTouchEffectEnabled", Boolean::class.javaPrimitiveType!!)
-            XposedBridge.log("$TAG: LiquidGlassView methods resolved")
 
             val cornerPx = settings.cornerRadius * density
             setCornerRadius.invoke(lgView, cornerPx)
@@ -58,25 +56,32 @@ object LiquidGlassHook {
             setElastic.invoke(lgView, false)
             setTouch.invoke(lgView, false)
 
-            XposedBridge.log("$TAG: LiquidGlassView configured")
-
             val viewClass = Class.forName("android.view.View")
-            if (viewClass.isInstance(lgView)) {
-                val lv = lgView as android.view.View
-                lv.layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
-                cardContainer.addView(lv, 0)
-                XposedBridge.log("$TAG: LiquidGlassView added to card container at index 0")
-            } else {
+            if (!viewClass.isInstance(lgView)) {
                 XposedBridge.log("$TAG: LiquidGlassView is not a View")
                 return false
             }
+            val lv = lgView as android.view.View
+            lv.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
 
-            bind.invoke(lgView, cardContainer)
-            XposedBridge.log("$TAG: LiquidGlassView bound to card container")
+            if (surface is ViewGroup) {
+                surface.addView(lv, 0)
+                bind.invoke(lgView, surface)
+            } else if (surface.parent is ViewGroup) {
+                val parent = surface.parent as ViewGroup
+                parent.addView(lv, parent.indexOfChild(surface))
+                // Try binding to the parent view (content behind surface)
+                val root = surface.rootView as? ViewGroup ?: parent
+                bind.invoke(lgView, root)
+            } else {
+                XposedBridge.log("$TAG: Cannot find parent for surface")
+                return false
+            }
 
+            XposedBridge.log("$TAG: LiquidGlassView applied to ${surface.javaClass.simpleName}")
             true
         } catch (e: UnsatisfiedLinkError) {
             XposedBridge.log("$TAG: LiquidGlass native libs failed: ${e.message}")
@@ -85,7 +90,7 @@ object LiquidGlassHook {
             XposedBridge.log("$TAG: LiquidGlassView not found: ${e.message}")
             false
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: LiquidGlassView error: ${e.message}")
+            XposedBridge.log("$TAG: LiquidGlassView error on ${surface.javaClass.simpleName}: ${e.message}")
             XposedBridge.log(e)
             false
         }

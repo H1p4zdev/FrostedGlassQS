@@ -49,6 +49,14 @@ class HookEntry : IXposedHookLoadPackage {
             XposedBridge.log("$TAG: Lockscreen hook error: ${e.message}")
         }
 
+        // Dialogs
+        try {
+            TileBlurHook.hookDialogs(param.classLoader)
+            XposedBridge.log("$TAG: Dialog hooks done")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG: Dialog hook error: ${e.message}")
+        }
+
         XposedBridge.log("$TAG: *** All hooks applied! ***")
     }
 }

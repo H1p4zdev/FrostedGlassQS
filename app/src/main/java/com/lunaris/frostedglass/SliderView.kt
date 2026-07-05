@@ -33,13 +33,13 @@ class SliderView(
     private val thumbStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFFFFFFF.toInt()
         style = Paint.Style.STROKE
-        strokeWidth = dp(2).toFloat()
+        strokeWidth = dpf(2)
     }
 
     private val density = context.resources.displayMetrics.density
-    private val trackHeight = dp(4)
-    private val thumbRadius = dp(10)
-    private val hitPadding = dp(16)
+    private val trackHeight = dpf(4)
+    private val thumbRadius = dpf(10)
+    private val hitPadding = dpf(16)
 
     private var isDragging = false
     private var thumbX = 0f
@@ -49,7 +49,7 @@ class SliderView(
     init {
         val ratio = (currentVal - minVal).toFloat() / (maxVal - minVal).coerceAtLeast(1).toFloat()
         thumbX = ratio
-        minimumHeight = dp(40)
+        minimumHeight = dpf(40).toInt()
     }
 
     fun setValue(value: Int) {
@@ -62,7 +62,7 @@ class SliderView(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         val pad = thumbRadius + hitPadding
-        trackRect.set(pad, (h - trackHeight) / 2f, (w - pad).toFloat(), (h + trackHeight) / 2f)
+        trackRect.set(pad, (h - trackHeight) / 2f, w - pad, (h + trackHeight) / 2f)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -81,7 +81,7 @@ class SliderView(
         canvas.drawRoundRect(progressRect, trackHeight / 2f, trackHeight / 2f, progressPaint)
 
         // thumb shadow (semi-transparent circle)
-        canvas.drawCircle(thumbCenterX, h / 2f, thumbRadius + dp(2), Paint().apply {
+        canvas.drawCircle(thumbCenterX, h / 2f, thumbRadius + dpf(2), Paint().apply {
             color = 0x33000000.toInt()
             isAntiAlias = true
         })
@@ -132,5 +132,5 @@ class SliderView(
         invalidate()
     }
 
-    private fun dp(value: Int): Int = (value * density).toInt()
+    private fun dpf(value: Int): Float = value * density
 }
