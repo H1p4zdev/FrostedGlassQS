@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    
+    <!-- Rounded corners for glass effect -->
+    <corners android:radius="20dp" />
+    
+    <!-- More opaque white fill when active -->
+    <solid android:color="#60FFFFFF" />
+    
+    <!-- Brighter border when active -->
+    <stroke
+        android:width="1dp"
+        android:color="#40FFFFFF" />
+    
+</shape>

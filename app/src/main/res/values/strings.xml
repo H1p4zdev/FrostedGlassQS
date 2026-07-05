@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FrostedGlass QS</string>
+    <string name="module_description">Adds frosted glass blur effect to Quick Settings tiles</string>
+    <string name="module_enabled">Module Enabled</string>
+    <string name="blur_intensity">Blur Intensity</string>
+    <string name="tile_opacity">Tile Opacity</string>
+</resources>
