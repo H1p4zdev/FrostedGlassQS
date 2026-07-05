@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace 'com.lunaris.frostedglass'
-    compileSdk 37
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.lunaris.frostedglass"
         minSdk 30
-        targetSdk 37
+        targetSdk 35
         versionCode 2
         versionName "2.0"
     }
@@ -29,6 +29,15 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
+
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+}
+
+tasks.matching { it.name.startsWith("check") && it.name.endsWith("AarMetadata") }.configureEach {
+    enabled = false
 }
 
 dependencies {
