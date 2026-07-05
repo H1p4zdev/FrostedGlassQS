@@ -239,13 +239,11 @@ object TileBlurHook {
 
             // === 1. CARD BACKGROUND ===
             if (settings.liquidGlass) {
-                // Try LiquidGlassView — if it succeeds, it replaces the background
-                val lgSuccess = LiquidGlassHook.applyToPowerMenu(listView, settings, moduleLoader)
+                val lgSuccess = LiquidGlassHook.applyToSurface(listView, settings, moduleLoader)
                 if (lgSuccess) {
                     XposedBridge.log("$TAG: LiquidGlassView applied to power menu")
-                    // Do NOT set GradientDrawable background — LiquidGlassView handles it
                 } else {
-                    XposedBridge.log("$TAG: LiquidGlassView failed, using fallback GradientDrawable")
+                    XposedBridge.log("$TAG: LiquidGlassView failed, using fallback")
                     listView.background = GradientDrawable().apply {
                         shape = GradientDrawable.RECTANGLE
                         setCornerRadius(cardCorner.toFloat())
@@ -253,7 +251,6 @@ object TileBlurHook {
                     }
                 }
             } else {
-                // Original OEM approach: dark glass card
                 listView.background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     setCornerRadius(cardCorner.toFloat())
