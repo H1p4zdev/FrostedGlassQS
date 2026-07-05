@@ -4,6 +4,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.View
+import android.view.ViewGroup
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -26,7 +27,7 @@ object TileBlurHook {
         return try {
             val file = File(SHARED_PATH)
             if (!file.exists()) {
-                XposedBridge.log("$TAG: Config file not found at $SHARED_PATH, using defaults")
+                XposedBridge.log("$TAG: Config not found, using defaults")
                 return FrostedSettings()
             }
             val xml = file.readText()
@@ -35,36 +36,24 @@ object TileBlurHook {
             val tileOpacity = parseInt(xml, "tile_opacity", 19)
             val panelBlur = parseBool(xml, "panel_blur", true)
             val cornerRadius = parseInt(xml, "corner_radius", 20)
-            XposedBridge.log("$TAG: Read settings: enabled=$enabled, blur=$blurRadius, opacity=$tileOpacity, corners=$cornerRadius")
             FrostedSettings(enabled, blurRadius, tileOpacity, panelBlur, cornerRadius)
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: Error reading config: ${e.message}")
             FrostedSettings()
         }
     }
 
     private fun parseBool(xml: String, key: String, default: Boolean): Boolean {
-        val pattern = "<boolean name=\"$key\" value=\"(true|false)\""
-        val match = Regex(pattern).find(xml) ?: return default
+        val match = Regex("<boolean name=\"$key\" value=\"(true|false)\"").find(xml) ?: return default
         return match.groupValues[1] == "true"
     }
 
     private fun parseInt(xml: String, key: String, default: Int): Int {
-        val pattern = "<int name=\"$key\" value=\"(-?\\d+)\""
-        val match = Regex(pattern).find(xml) ?: return default
+        val match = Regex("<int name=\"$key\" value=\"(-?\\d+)\"").find(xml) ?: return default
         return match.groupValues[1].toIntOrNull() ?: default
     }
 
     fun hookTiles(classLoader: ClassLoader) {
-        val settings = readSettings()
-        if (!settings.enabled) {
-            XposedBridge.log("$TAG: Module disabled in settings")
-            return
-        }
-
-        var hooked = false
-
-        // Primary: hook QSTileViewImpl.init(QSTile)
+        // Try to hook init(QSTile) for any FUTURE tiles
         try {
             val tileViewClass = XposedHelpers.findClass(
                 "com.android.systemui.qs.tileimpl.QSTileViewImpl", classLoader
@@ -80,65 +69,27 @@ object TileBlurHook {
                     }
                 }
             )
-            hooked = true
-            XposedBridge.log("$TAG: Hooked QSTileViewImpl.init(QSTile)")
+            XposedBridge.log("$TAG: Hooked QSTileViewImpl.init()")
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: QSTileViewImpl.init hook failed: ${e.message}")
+            XposedBridge.log("$TAG: init hook failed: ${e.message}")
         }
 
-        // Fallback: hook onFinishInflate on QSTileView (parent class)
-        if (!hooked) {
-            try {
-                val tileViewClass = XposedHelpers.findClass(
-                    "com.android.systemui.plugins.qs.QSTileView", classLoader
-                )
-                XposedHelpers.findAndHookMethod(
-                    tileViewClass, "onFinishInflate",
-                    object : XC_MethodHook() {
-                        override fun afterHookedMethod(param: MethodHookParam) {
-                            applyTileEffect(param.thisObject as View, readSettings())
-                        }
+        // Also hook onAttachedToWindow for future tiles
+        try {
+            val tileViewClass = XposedHelpers.findClass(
+                "com.android.systemui.qs.tileimpl.QSTileViewImpl", classLoader
+            )
+            XposedHelpers.findAndHookMethod(
+                tileViewClass, "onAttachedToWindow",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        applyTileEffect(param.thisObject as View, readSettings())
                     }
-                )
-                hooked = true
-                XposedBridge.log("$TAG: Hooked QSTileView.onFinishInflate()")
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG: QSTileView.onFinishInflate hook failed: ${e.message}")
-            }
-        }
-
-        // Fallback: hook any View subclass named QSTile*
-        if (!hooked) {
-            try {
-                val candidates = listOf(
-                    "com.android.systemui.qs.tileimpl.QSTileViewImpl",
-                    "com.android.systemui.qs.tileimpl.QSTileView",
-                    "com.android.systemui.qs.tileimpl.ChipView",
-                    "com.android.systemui.qs.tileimpl.SecQSTileViewImpl"
-                )
-                for (name in candidates) {
-                    try {
-                        val clazz = XposedHelpers.findClass(name, classLoader)
-                        XposedHelpers.findAndHookMethod(
-                            clazz, "onFinishInflate",
-                            object : XC_MethodHook() {
-                                override fun afterHookedMethod(param: MethodHookParam) {
-                                    applyTileEffect(param.thisObject as View, readSettings())
-                                }
-                            }
-                        )
-                        hooked = true
-                        XposedBridge.log("$TAG: Hooked $name.onFinishInflate()")
-                        break
-                    } catch (_: Throwable) {}
                 }
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG: Candidate hooks failed: ${e.message}")
-            }
-        }
-
-        if (!hooked) {
-            XposedBridge.log("$TAG: WARNING - No tile hooks were successful!")
+            )
+            XposedBridge.log("$TAG: Hooked QSTileViewImpl.onAttachedToWindow()")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG: onAttachedToWindow hook failed: ${e.message}")
         }
     }
 
@@ -152,6 +103,8 @@ object TileBlurHook {
         for (name in candidates) {
             try {
                 val panelClass = XposedHelpers.findClass(name, classLoader)
+
+                // Hook onLayout — walk tree and modify all tiles
                 XposedHelpers.findAndHookMethod(
                     panelClass, "onLayout",
                     Boolean::class.javaPrimitiveType,
@@ -162,19 +115,41 @@ object TileBlurHook {
                     object : XC_MethodHook() {
                         override fun afterHookedMethod(param: MethodHookParam) {
                             val settings = readSettings()
-                            if (!settings.enabled || !settings.panelBlur) return
-                            val view = param.thisObject as View
-                            try {
-                                view.setBackgroundColor(0x10000000.toInt())
-                            } catch (_: Throwable) {}
+                            if (!settings.enabled) return
+                            val panel = param.thisObject as View
+                            applyPanelEffect(panel, settings)
+                            walkAndApplyTiles(panel, settings)
                         }
                     }
                 )
-                XposedBridge.log("$TAG: Hooked $name.onLayout()")
+                XposedBridge.log("$TAG: Hooked $name.onLayout() — will walk tile tree")
                 return
             } catch (_: Throwable) {}
         }
         XposedBridge.log("$TAG: WARNING - No panel hooks succeeded!")
+    }
+
+    private fun walkAndApplyTiles(view: View, settings: FrostedSettings) {
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val child = view.getChildAt(i)
+                // Match any view that could be a QS tile
+                val className = child.javaClass.name
+                if (className.contains("QSTileView") || className.contains("TileView")) {
+                    applyTileEffect(child, settings)
+                }
+                if (child is ViewGroup) {
+                    walkAndApplyTiles(child, settings)
+                }
+            }
+        }
+    }
+
+    private fun applyPanelEffect(panel: View, settings: FrostedSettings) {
+        if (!settings.panelBlur) return
+        try {
+            panel.setBackgroundColor(0x08000000.toInt())
+        } catch (_: Throwable) {}
     }
 
     private fun applyTileEffect(view: View, settings: FrostedSettings) {
@@ -198,15 +173,24 @@ object TileBlurHook {
                         if (baseDrawable is GradientDrawable) {
                             baseDrawable.setColor(bgColor)
                             baseDrawable.cornerRadius = cornerRadius
-                            XposedBridge.log("$TAG: Tile translucent (opacity=${settings.tileOpacity}%, corners=${settings.cornerRadius}dp)")
+                            XposedBridge.log("$TAG: Tile modified (opacity=${settings.tileOpacity}%, corners=${settings.cornerRadius}dp)")
                         }
                     }
                 } catch (e: Throwable) {
-                    XposedBridge.log("$TAG: Background modify error: ${e.message}")
+                    XposedBridge.log("$TAG: BG modify error: ${e.message}")
                 }
+            } else {
+                // Fallback: try setting background directly
+                try {
+                    val drawable = view.background?.mutate()
+                    if (drawable is GradientDrawable) {
+                        drawable.setColor(bgColor)
+                        drawable.cornerRadius = cornerRadius
+                    }
+                } catch (_: Throwable) {}
             }
 
-            // Window background blur
+            // Window background blur via ViewRootImpl
             if (settings.blurRadius > 0) {
                 try {
                     val viewClass = Class.forName("android.view.View")
@@ -223,15 +207,14 @@ object TileBlurHook {
                         }
                         applyMethod?.isAccessible = true
                         applyMethod?.invoke(blurUtils, viewRoot, settings.blurRadius, false)
-                        XposedBridge.log("$TAG: Applied blur radius ${settings.blurRadius}")
+                        XposedBridge.log("$TAG: Blur applied (radius=${settings.blurRadius})")
                     }
                 } catch (e: Throwable) {
-                    XposedBridge.log("$TAG: Blur apply error: ${e.message}")
+                    XposedBridge.log("$TAG: Blur error: ${e.message}")
                 }
             }
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: applyTileEffect error: ${e.message}")
-            XposedBridge.log(e)
         }
     }
 }
