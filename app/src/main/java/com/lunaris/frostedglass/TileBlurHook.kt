@@ -511,9 +511,6 @@ object TileBlurHook {
                 val className = child.javaClass.name
                 if (className.contains("QSTileView") || className.contains("TileView")) {
                     applyTileEffect(child, settings)
-                    if (settings.liquidGlass && child is ViewGroup) {
-                        LiquidGlassHook.applyToSurface(child, settings, moduleLoader)
-                    }
                 }
                 if (child is ViewGroup) {
                     walkAndApplyTiles(child, settings, moduleLoader)

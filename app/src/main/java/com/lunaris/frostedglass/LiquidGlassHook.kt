@@ -67,17 +67,23 @@ object LiquidGlassHook {
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
 
+            lv.isClickable = false
+            lv.isFocusable = false
+            lv.isEnabled = false
+
             if (surface is ViewGroup) {
                 surface.addView(lv, 0)
-                bind.invoke(lgView, surface)
+                val source = surface.parent as? ViewGroup ?: (surface.rootView as? ViewGroup) ?: surface
+                bind.invoke(lgView, source)
+                XposedBridge.log("$TAG: LiquidGlassView added to ${surface.javaClass.simpleName}, bound to ${source.javaClass.simpleName}")
             } else if (surface.parent is ViewGroup) {
                 val parent = surface.parent as ViewGroup
                 parent.addView(lv, parent.indexOfChild(surface))
-                // Try binding to the parent view (content behind surface)
-                val root = surface.rootView as? ViewGroup ?: parent
-                bind.invoke(lgView, root)
+                val source = surface.rootView as? ViewGroup ?: parent
+                bind.invoke(lgView, source)
+                XposedBridge.log("$TAG: LiquidGlassView added before ${surface.javaClass.simpleName}, bound to ${source.javaClass.simpleName}")
             } else {
-                XposedBridge.log("$TAG: Cannot find parent for surface")
+                XposedBridge.log("$TAG: Cannot find parent for ${surface.javaClass.simpleName}")
                 return false
             }
 
