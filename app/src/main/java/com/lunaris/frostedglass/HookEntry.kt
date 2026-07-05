@@ -8,25 +8,32 @@ class HookEntry : IXposedHookLoadPackage {
 
     companion object {
         private const val TAG = "FrostedGlassQS"
-        private const val SYSTEMUI_PACKAGE = "com.android.systemui"
     }
 
     override fun handleLoadPackage(param: XC_LoadPackage.LoadPackageParam) {
-        if (param.packageName != SYSTEMUI_PACKAGE) return
+        // Log ALL packages to verify module loads
+        XposedBridge.log("$TAG: [LOADED] Package: ${param.packageName}")
 
-        XposedBridge.log("$TAG: Hooking SystemUI...")
+        if (param.packageName != "com.android.systemui") return
+
+        XposedBridge.log("$TAG: *** SystemUI detected! Applying hooks... ***")
 
         try {
-            // Hook QS Tile views
             TileBlurHook.hookTiles(param.classLoader)
-            
-            // Hook QS Panel
-            TileBlurHook.hookPanel(param.classLoader)
-
-            XposedBridge.log("$TAG: All hooks applied successfully!")
+            XposedBridge.log("$TAG: Tile hooks done")
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: Error applying hooks: ${e.message}")
+            XposedBridge.log("$TAG: Tile hook error: ${e.message}")
             XposedBridge.log(e)
         }
+
+        try {
+            TileBlurHook.hookPanel(param.classLoader)
+            XposedBridge.log("$TAG: Panel hooks done")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG: Panel hook error: ${e.message}")
+            XposedBridge.log(e)
+        }
+
+        XposedBridge.log("$TAG: *** All hooks applied! ***")
     }
 }

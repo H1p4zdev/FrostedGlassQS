@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -13,32 +12,41 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import java.io.File
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        const val KEY_ENABLED = "frosted_glass_enabled"
-        const val KEY_BLUR_RADIUS = "frosted_glass_blur_radius"
-        const val KEY_TILE_OPACITY = "frosted_glass_tile_opacity"
-        const val KEY_PANEL_BLUR = "frosted_glass_panel_blur"
-        const val KEY_CORNER_RADIUS = "frosted_glass_corner_radius"
+        const val PREFS_NAME = "frosted_glass_prefs"
+        const val KEY_ENABLED = "enabled"
+        const val KEY_BLUR_RADIUS = "blur_radius"
+        const val KEY_TILE_OPACITY = "tile_opacity"
+        const val KEY_PANEL_BLUR = "panel_blur"
+        const val KEY_CORNER_RADIUS = "corner_radius"
+        const val SHARED_PATH = "/data/local/tmp/frosted_glass_qs.xml"
 
-        fun putInt(ctx: Context, key: String, value: Int) {
-            Settings.Global.putInt(ctx.contentResolver, key, value)
-        }
+        fun getPrefs(context: Context) =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-        fun putBool(ctx: Context, key: String, value: Boolean) {
-            Settings.Global.putInt(ctx.contentResolver, key, if (value) 1 else 0)
-        }
-
-        fun getInt(ctx: Context, key: String, default: Int): Int {
-            return Settings.Global.getInt(ctx.contentResolver, key, default)
-        }
-
-        fun getBool(ctx: Context, key: String, default: Boolean): Boolean {
-            val v = Settings.Global.getInt(ctx.contentResolver, key, if (default) 1 else 0)
-            return v == 1
+        private fun copyPrefsToShared(ctx: Context): Boolean {
+            return try {
+                val src = File(ctx.applicationInfo.dataDir, "shared_prefs/$PREFS_NAME.xml")
+                if (!src.exists()) {
+                    Toast.makeText(ctx, "Prefs file not found", Toast.LENGTH_SHORT).show()
+                    return false
+                }
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                    "cp '${src.absolutePath}' $SHARED_PATH && chmod 666 $SHARED_PATH"
+                ))
+                val done = process.waitFor(5, TimeUnit.SECONDS)
+                done && process.exitValue() == 0
+            } catch (e: Exception) {
+                Toast.makeText(ctx, "Root failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                false
+            }
         }
     }
 
@@ -46,15 +54,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val prefs = getPrefs(this)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(24), dp(24), dp(24))
             setBackgroundColor(0xFF1A1A2E.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT
-            )
         }
 
         root.addView(TextView(this).apply {
@@ -66,61 +71,53 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.addView(TextView(this).apply {
-            text = "Control blur settings in real-time"
+            text = "Adjust blur settings, save, then reboot"
             setTextColor(0x99FFFFFF.toInt())
             textSize = 14f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, dp(24))
         })
 
-        val enabledSwitch = Switch(this).apply {
+        root.addView(Switch(this).apply {
             text = "Enable Frosted Glass"
             setTextColor(Color.WHITE)
             textSize = 16f
-            isChecked = getBool(this@MainActivity, KEY_ENABLED, true)
+            isChecked = prefs.getBoolean(KEY_ENABLED, true)
             setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
-                putBool(this@MainActivity, KEY_ENABLED, isChecked)
+                prefs.edit().putBoolean(KEY_ENABLED, isChecked).apply()
                 updatePreview()
             }
-            val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            params.setMargins(0, dp(12), 0, dp(12))
-            layoutParams = params
-        }
-        root.addView(enabledSwitch)
-
-        root.addView(createSlider("Tile Blur Radius", getInt(this, KEY_BLUR_RADIUS, 20), 0, 50) { value ->
-            putInt(this, KEY_BLUR_RADIUS, value)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(12), 0, dp(12)) }
         })
 
-        root.addView(createSlider("Tile Opacity", getInt(this, KEY_TILE_OPACITY, 19), 0, 100) { value ->
-            putInt(this, KEY_TILE_OPACITY, value)
+        root.addView(createSlider("Tile Blur Radius", prefs.getInt(KEY_BLUR_RADIUS, 20), 0, 50) { v ->
+            prefs.edit().putInt(KEY_BLUR_RADIUS, v).apply()
+        })
+
+        root.addView(createSlider("Tile Opacity", prefs.getInt(KEY_TILE_OPACITY, 19), 0, 100) { v ->
+            prefs.edit().putInt(KEY_TILE_OPACITY, v).apply()
             updatePreview()
         })
 
-        root.addView(createSlider("Corner Radius (dp)", getInt(this, KEY_CORNER_RADIUS, 20), 0, 40) { value ->
-            putInt(this, KEY_CORNER_RADIUS, value)
+        root.addView(createSlider("Corner Radius (dp)", prefs.getInt(KEY_CORNER_RADIUS, 20), 0, 40) { v ->
+            prefs.edit().putInt(KEY_CORNER_RADIUS, v).apply()
             updatePreview()
         })
 
-        val panelSwitch = Switch(this).apply {
+        root.addView(Switch(this).apply {
             text = "Panel Blur"
             setTextColor(Color.WHITE)
             textSize = 16f
-            isChecked = getBool(this@MainActivity, KEY_PANEL_BLUR, true)
+            isChecked = prefs.getBoolean(KEY_PANEL_BLUR, true)
             setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
-                putBool(this@MainActivity, KEY_PANEL_BLUR, isChecked)
+                prefs.edit().putBoolean(KEY_PANEL_BLUR, isChecked).apply()
             }
-            val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            params.setMargins(0, dp(12), 0, dp(12))
-            layoutParams = params
-        }
-        root.addView(panelSwitch)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(12), 0, dp(12)) }
+        })
 
         root.addView(TextView(this).apply {
             text = "Preview"
@@ -135,16 +132,13 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(12), 0, dp(12))
         }
-
         for (i in 1..3) {
             val tile = createPreviewTile()
-            val params = LinearLayout.LayoutParams(dp(80), dp(80)).apply {
+            tile.layoutParams = LinearLayout.LayoutParams(dp(80), dp(80)).apply {
                 setMargins(dp(8), dp(8), dp(8), dp(8))
             }
-            tile.layoutParams = params
             previewContainer.addView(tile)
         }
-
         root.addView(previewContainer)
 
         root.addView(Button(this).apply {
@@ -152,14 +146,35 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(0xFF6C63FF.toInt())
             setTextColor(Color.WHITE)
             setPadding(dp(16), dp(12), dp(16), dp(12))
-            val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = dp(24)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(24) }
+            setOnClickListener {
+                val saved = copyPrefsToShared(this@MainActivity)
+                if (saved) {
+                    Toast.makeText(this@MainActivity, "Settings saved! Rebooting...", Toast.LENGTH_SHORT).show()
+                    android.os.Handler(mainLooper).postDelayed({
+                        Runtime.getRuntime().exec(arrayOf("su", "-c", "reboot"))
+                    }, 1000)
+                }
             }
-            layoutParams = params
-            setOnClickListener { recreate() }
+        })
+
+        root.addView(Button(this).apply {
+            text = "Save Only (No Reboot)"
+            setBackgroundColor(0xFF444444.toInt())
+            setTextColor(0x99FFFFFF.toInt())
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(8) }
+            setOnClickListener {
+                val saved = copyPrefsToShared(this@MainActivity)
+                Toast.makeText(this@MainActivity,
+                    if (saved) "Saved! Reboot to apply." else "Save failed",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         })
 
         root.addView(Button(this).apply {
@@ -167,19 +182,12 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(0xFF333333.toInt())
             setTextColor(0x99FFFFFF.toInt())
             setPadding(dp(16), dp(12), dp(16), dp(12))
-            val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = dp(8)
-            }
-            layoutParams = params
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(8) }
             setOnClickListener {
-                Settings.Global.putString(contentResolver, KEY_ENABLED, null)
-                Settings.Global.putString(contentResolver, KEY_BLUR_RADIUS, null)
-                Settings.Global.putString(contentResolver, KEY_TILE_OPACITY, null)
-                Settings.Global.putString(contentResolver, KEY_PANEL_BLUR, null)
-                Settings.Global.putString(contentResolver, KEY_CORNER_RADIUS, null)
+                getPrefs(this@MainActivity).edit().clear().apply()
+                Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f $SHARED_PATH"))
                 recreate()
             }
         })
@@ -189,17 +197,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun createPreviewTile(): View {
         val density = resources.displayMetrics.density
-        val enabled = getBool(this, KEY_ENABLED, true)
-        val opacity = getInt(this, KEY_TILE_OPACITY, 19)
-        val cornerRadius = getInt(this, KEY_CORNER_RADIUS, 20)
-
+        val prefs = getPrefs(this)
+        val enabled = prefs.getBoolean(KEY_ENABLED, true)
+        val opacity = prefs.getInt(KEY_TILE_OPACITY, 19)
+        val cornerRadius = prefs.getInt(KEY_CORNER_RADIUS, 20)
         val alpha = if (enabled) opacity.toFloat() / 100f else 1f
-        val bgColor = if (enabled) {
-            val white = (255 * alpha).toInt()
-            (white shl 24) or 0xFFFFFF
-        } else {
-            0xFF333333.toInt()
-        }
+        val bgColor = if (enabled) ((255 * alpha).toInt() shl 24) or 0xFFFFFF else 0xFF333333.toInt()
 
         return View(this).apply {
             background = GradientDrawable().apply {
@@ -215,21 +218,15 @@ class MainActivity : AppCompatActivity() {
     private fun updatePreview() {
         val container = findViewById<LinearLayout>(previewContainerId) ?: return
         val density = resources.displayMetrics.density
-        val enabled = getBool(this, KEY_ENABLED, true)
-        val opacity = getInt(this, KEY_TILE_OPACITY, 19)
-        val cornerRadius = getInt(this, KEY_CORNER_RADIUS, 20)
-
+        val prefs = getPrefs(this)
+        val enabled = prefs.getBoolean(KEY_ENABLED, true)
+        val opacity = prefs.getInt(KEY_TILE_OPACITY, 19)
+        val cornerRadius = prefs.getInt(KEY_CORNER_RADIUS, 20)
         val alpha = if (enabled) opacity.toFloat() / 100f else 1f
-        val bgColor = if (enabled) {
-            val white = (255 * alpha).toInt()
-            (white shl 24) or 0xFFFFFF
-        } else {
-            0xFF333333.toInt()
-        }
+        val bgColor = if (enabled) ((255 * alpha).toInt() shl 24) or 0xFFFFFF else 0xFF333333.toInt()
 
         for (i in 0 until container.childCount) {
-            val tile = container.getChildAt(i)
-            tile.background = GradientDrawable().apply {
+            container.getChildAt(i).background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 setCornerRadius(cornerRadius * density)
                 setColor(bgColor)
@@ -246,25 +243,22 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.END
             minWidth = dp(40)
         }
-
         val seekBar = SeekBar(this).apply {
             this.max = max
             this.progress = value
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                     valueText.text = "$progress"
                     onChange(progress)
                 }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
             })
         }
-
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(8), 0, dp(8))
-
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(TextView(this@MainActivity).apply {
@@ -275,12 +269,9 @@ class MainActivity : AppCompatActivity() {
                 })
                 addView(valueText)
             })
-
             addView(seekBar)
         }
     }
 
-    private fun dp(value: Int): Int {
-        return (value * resources.displayMetrics.density).toInt()
-    }
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }
