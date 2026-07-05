@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Background circle -->
+    <path
+        android:fillColor="#FF40FFFFFF"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0" />
+    
+    <!-- Frosted glass effect lines -->
+    <path
+        android:strokeColor="#CCFFFFFF"
+        android:strokeWidth="2"
+        android:pathData="M30,40 L78,40 M30,54 L78,54 M30,68 L78,68" />
+    
+    <!-- Blur symbol -->
+    <path
+        android:fillColor="#CCFFFFFF"
+        android:pathData="M54,30 C65,30 74,39 74,50 C74,61 65,70 54,70 C43,70 34,61 34,50 C34,39 43,30 54,30z" />
+    
+</vector>
