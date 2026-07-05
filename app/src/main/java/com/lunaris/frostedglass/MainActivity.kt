@@ -9,6 +9,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.CompoundButton
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
@@ -26,12 +27,14 @@ class MainActivity : AppCompatActivity() {
         const val KEY_TILE_OPACITY = "tile_opacity"
         const val KEY_PANEL_BLUR = "panel_blur"
         const val KEY_CORNER_RADIUS = "corner_radius"
+        const val KEY_POWER_MENU = "power_menu"
+        const val KEY_LOCKSCREEN = "lockscreen"
         const val SHARED_PATH = "/data/local/tmp/frosted_glass_qs.xml"
 
         fun getPrefs(context: Context) =
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-        private fun copyPrefsToShared(ctx: Context): Boolean {
+        fun copyPrefsToShared(ctx: Context): Boolean {
             return try {
                 val src = File(ctx.applicationInfo.dataDir, "shared_prefs/$PREFS_NAME.xml")
                 if (!src.exists()) {
@@ -56,30 +59,32 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getPrefs(this)
 
-        val root = LinearLayout(this).apply {
+        val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(24), dp(24), dp(24))
-            setBackgroundColor(0xFF1A1A2E.toInt())
         }
 
-        root.addView(TextView(this).apply {
-            text = "Frosted Glass QS"
+        content.addView(TextView(this).apply {
+            text = "Frosted Glass"
             setTextColor(Color.WHITE)
             textSize = 24f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, dp(8))
         })
 
-        root.addView(TextView(this).apply {
-            text = "Adjust blur settings, save, then reboot"
+        content.addView(TextView(this).apply {
+            text = "Adjust settings, save, then reboot"
             setTextColor(0x99FFFFFF.toInt())
             textSize = 14f
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(24))
+            setPadding(0, 0, 0, dp(16))
         })
 
-        root.addView(Switch(this).apply {
-            text = "Enable Frosted Glass"
+        // === QS TILES SECTION ===
+        content.addView(sectionHeader("QS Tiles"))
+
+        content.addView(Switch(this).apply {
+            text = "Enable QS Tile Effects"
             setTextColor(Color.WHITE)
             textSize = 16f
             isChecked = prefs.getBoolean(KEY_ENABLED, true)
@@ -89,25 +94,25 @@ class MainActivity : AppCompatActivity() {
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(0, dp(12), 0, dp(12)) }
+            ).apply { setMargins(0, dp(8), 0, dp(8)) }
         })
 
-        root.addView(createSlider("Tile Blur Radius", prefs.getInt(KEY_BLUR_RADIUS, 20), 0, 50) { v ->
+        content.addView(createSlider("Tile Blur Radius", prefs.getInt(KEY_BLUR_RADIUS, 20), 0, 50) { v ->
             prefs.edit().putInt(KEY_BLUR_RADIUS, v).apply()
         })
 
-        root.addView(createSlider("Tile Opacity", prefs.getInt(KEY_TILE_OPACITY, 19), 0, 100) { v ->
+        content.addView(createSlider("Tile Opacity", prefs.getInt(KEY_TILE_OPACITY, 19), 0, 100) { v ->
             prefs.edit().putInt(KEY_TILE_OPACITY, v).apply()
             updatePreview()
         })
 
-        root.addView(createSlider("Corner Radius (dp)", prefs.getInt(KEY_CORNER_RADIUS, 20), 0, 40) { v ->
+        content.addView(createSlider("Corner Radius (dp)", prefs.getInt(KEY_CORNER_RADIUS, 20), 0, 40) { v ->
             prefs.edit().putInt(KEY_CORNER_RADIUS, v).apply()
             updatePreview()
         })
 
-        root.addView(Switch(this).apply {
-            text = "Panel Blur"
+        content.addView(Switch(this).apply {
+            text = "QS Panel Blur"
             setTextColor(Color.WHITE)
             textSize = 16f
             isChecked = prefs.getBoolean(KEY_PANEL_BLUR, true)
@@ -116,43 +121,76 @@ class MainActivity : AppCompatActivity() {
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(0, dp(12), 0, dp(12)) }
+            ).apply { setMargins(0, dp(8), 0, dp(8)) }
         })
 
-        root.addView(TextView(this).apply {
+        // Preview
+        content.addView(TextView(this).apply {
             text = "Preview"
-            setTextColor(0x99FFFFFF.toInt())
-            textSize = 16f
-            setPadding(0, dp(24), 0, dp(12))
+            setTextColor(0x66FFFFFF.toInt())
+            textSize = 14f
+            setPadding(0, dp(12), 0, dp(8))
         })
 
         val previewContainer = LinearLayout(this).apply {
             id = previewContainerId
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, dp(12), 0, dp(12))
         }
         for (i in 1..3) {
             val tile = createPreviewTile()
-            tile.layoutParams = LinearLayout.LayoutParams(dp(80), dp(80)).apply {
-                setMargins(dp(8), dp(8), dp(8), dp(8))
+            tile.layoutParams = LinearLayout.LayoutParams(dp(72), dp(72)).apply {
+                setMargins(dp(6), dp(6), dp(6), dp(6))
             }
             previewContainer.addView(tile)
         }
-        root.addView(previewContainer)
+        content.addView(previewContainer)
 
-        root.addView(Button(this).apply {
-            text = "Save & Reboot to Apply"
+        // === POWER MENU SECTION ===
+        content.addView(sectionHeader("Power Menu"))
+
+        content.addView(Switch(this).apply {
+            text = "Frosted Power Menu"
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            isChecked = prefs.getBoolean(KEY_POWER_MENU, true)
+            setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
+                prefs.edit().putBoolean(KEY_POWER_MENU, isChecked).apply()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(8), 0, dp(8)) }
+        })
+
+        // === LOCKSCREEN SECTION ===
+        content.addView(sectionHeader("Lockscreen"))
+
+        content.addView(Switch(this).apply {
+            text = "Frosted Lockscreen"
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            isChecked = prefs.getBoolean(KEY_LOCKSCREEN, true)
+            setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
+                prefs.edit().putBoolean(KEY_LOCKSCREEN, isChecked).apply()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(8), 0, dp(8)) }
+        })
+
+        // === BUTTONS ===
+        content.addView(Button(this).apply {
+            text = "Save & Reboot"
             setBackgroundColor(0xFF6C63FF.toInt())
             setTextColor(Color.WHITE)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setPadding(dp(16), dp(14), dp(16), dp(14))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(24) }
             setOnClickListener {
                 val saved = copyPrefsToShared(this@MainActivity)
                 if (saved) {
-                    Toast.makeText(this@MainActivity, "Settings saved! Rebooting...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Saved! Rebooting...", Toast.LENGTH_SHORT).show()
                     android.os.Handler(mainLooper).postDelayed({
                         Runtime.getRuntime().exec(arrayOf("su", "-c", "reboot"))
                     }, 1000)
@@ -160,11 +198,11 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        root.addView(Button(this).apply {
-            text = "Save Only (No Reboot)"
+        content.addView(Button(this).apply {
+            text = "Save Only"
             setBackgroundColor(0xFF444444.toInt())
-            setTextColor(0x99FFFFFF.toInt())
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setTextColor(0xBBFFFFFF.toInt())
+            setPadding(dp(16), dp(14), dp(16), dp(14))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(8) }
@@ -177,11 +215,11 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        root.addView(Button(this).apply {
-            text = "Reset to Defaults"
+        content.addView(Button(this).apply {
+            text = "Reset Defaults"
             setBackgroundColor(0xFF333333.toInt())
-            setTextColor(0x99FFFFFF.toInt())
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setTextColor(0x66FFFFFF.toInt())
+            setPadding(dp(16), dp(14), dp(16), dp(14))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(8) }
@@ -192,7 +230,23 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        setContentView(root)
+        // Wrap in ScrollView
+        val scrollView = ScrollView(this).apply {
+            setBackgroundColor(0xFF1A1A2E.toInt())
+            addView(content)
+        }
+
+        setContentView(scrollView)
+    }
+
+    private fun sectionHeader(text: String): TextView {
+        return TextView(this).apply {
+            this.text = text
+            setTextColor(0xFF6C63FF.toInt())
+            textSize = 13f
+            setPadding(0, dp(20), 0, dp(4))
+            letterSpacing = 0.1f
+        }
     }
 
     private fun createPreviewTile(): View {
@@ -211,7 +265,6 @@ class MainActivity : AppCompatActivity() {
                 setColor(bgColor)
                 setStroke((1 * density).toInt(), 0x30FFFFFF.toInt())
             }
-            layoutParams = LinearLayout.LayoutParams(dp(80), dp(80))
         }
     }
 
@@ -258,7 +311,7 @@ class MainActivity : AppCompatActivity() {
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(8), 0, dp(8))
+            setPadding(0, dp(6), 0, dp(6))
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(TextView(this@MainActivity).apply {
