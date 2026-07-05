@@ -3,8 +3,6 @@ package com.lunaris.frostedglass
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Switch
-import android.widget.CompoundButton
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
@@ -22,7 +20,7 @@ class MainActivity : AppCompatActivity() {
         val title = TextView(this).apply {
             text = "Frosted Glass QS"
             textSize = 24f
-            setTextColor(resources.getColor(R.color.white, theme))
+            setTextColor(resources.getColor(android.R.color.white, theme))
             setPadding(0, 0, 0, 24)
         }
 
@@ -30,7 +28,7 @@ class MainActivity : AppCompatActivity() {
         val status = TextView(this).apply {
             text = "Module Status: Active"
             textSize = 16f
-            setTextColor(resources.getColor(R.color.teal_200, theme))
+            setTextColor(resources.getColor(android.R.color.holo_green_light, theme))
             setPadding(0, 0, 0, 16)
         }
 
@@ -39,7 +37,7 @@ class MainActivity : AppCompatActivity() {
             text = "This module adds a frosted glass blur effect to Quick Settings tiles.\n\n" +
                     "Features:\n" +
                     "- Translucent tile backgrounds\n" +
-                    "- Blur effect on tiles (Android 12+)\n" +
+                    "- Background blur on tiles (Android 12+)\n" +
                     "- Rounded corners\n\n" +
                     "Enable in LSPosed and select SystemUI as scope."
             textSize = 14f
