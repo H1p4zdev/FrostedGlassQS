@@ -28,10 +28,15 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Install Android SDK platforms
+    - name: Update SDK and install platform 37
       run: |
-        yes | sdkmanager --licenses || true
-        yes | sdkmanager "platforms;android-37" 2>/dev/null || true
+        yes | sdkmanager --licenses 2>&1 || true
+        yes | sdkmanager --install "cmdline-tools;latest" 2>&1 || true
+        # Try installing android-37
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-37" 2>&1 || \
+        yes | sdkmanager "platforms;android-37" 2>&1 || echo "android-37 not available in sdkmanager"
+        echo "=== Installed platforms ==="
+        ls $ANDROID_HOME/platforms/ 2>/dev/null || echo "No platforms dir"
 
     - name: Build Debug APK
       run: ./gradlew assembleDebug
