@@ -1,7 +1,6 @@
 package com.lunaris.frostedglass
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -11,7 +10,6 @@ import android.widget.Button
 import android.widget.CompoundButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -334,21 +332,13 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.END
             minWidth = dp(40)
         }
-        val seekBar = SeekBar(this).apply {
-            this.max = max
-            this.progress = value
-            progressTintList = ColorStateList.valueOf(0xFF6C63FF.toInt())
-            thumbTintList = ColorStateList.valueOf(0xFF6C63FF.toInt())
-            progressBackgroundTintList = ColorStateList.valueOf(0x44FFFFFF.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                    valueText.text = "$progress"
-                    onChange(progress)
-                }
-                override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) {}
-            })
+        val slider = SliderView(this, min, max, value) { v ->
+            valueText.text = "$v"
+            onChange(v)
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(40)
+            )
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -363,7 +353,7 @@ class MainActivity : AppCompatActivity() {
                 })
                 addView(valueText)
             })
-            addView(seekBar)
+            addView(slider)
         }
     }
 
