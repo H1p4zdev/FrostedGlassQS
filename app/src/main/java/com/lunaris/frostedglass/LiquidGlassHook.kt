@@ -1,6 +1,7 @@
 package com.lunaris.frostedglass
 
 import android.content.Context
+import android.content.res.Resources
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -10,21 +11,48 @@ object LiquidGlassHook {
 
     private const val TAG = "FrostedGlassQS"
 
-    fun applyToSurface(
-        surface: View,
+    fun applyToPowerMenu(
+        card: ViewGroup,
         settings: TileBlurHook.FrostedSettings,
         moduleLoader: ClassLoader
     ): Boolean {
         if (!settings.liquidGlass) return false
         return try {
-            val context = surface.context
+            val context = card.context
             val density = context.resources.displayMetrics.density
 
+            // 1. Detach card from parent
+            val parent = card.parent as? ViewGroup ?: return false
+            val cardIndex = parent.indexOfChild(card)
+            if (cardIndex < 0) return false
+            val cardLp = card.layoutParams
+
+            parent.removeView(card)
+
+            // 2. Create FrameLayout wrapper
+            val wrapper = FrameLayout(context)
+            wrapper.layoutParams = cardLp
+
+            // 3. Add card to wrapper at index 0 (will be bind source)
+            wrapper.addView(card, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+
+            // 4. Create LiquidGlassView via reflection
             val lgClass = moduleLoader.loadClass("com.qmdeve.liquidglass.widget.LiquidGlassView")
             val constructor = lgClass.getConstructor(Context::class.java)
-            val lgView = constructor.newInstance(context)
+            val lgView = constructor.newInstance(context) as View
 
-            val bind = lgClass.getMethod("bind", ViewGroup::class.java)
+            lgView.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            lgView.isClickable = false
+            lgView.isFocusable = false
+            lgView.isEnabled = false
+
+            // 5. Configure visual params via reflection
             val setCornerRadius = lgClass.getMethod("setCornerRadius", Float::class.javaPrimitiveType!!)
             val setRefractionHeight = lgClass.getMethod("setRefractionHeight", Float::class.javaPrimitiveType!!)
             val setRefractionOffset = lgClass.getMethod("setRefractionOffset", Float::class.javaPrimitiveType!!)
@@ -34,60 +62,31 @@ object LiquidGlassHook {
             val setDraggable = lgClass.getMethod("setDraggableEnabled", Boolean::class.javaPrimitiveType!!)
             val setElastic = lgClass.getMethod("setElasticEnabled", Boolean::class.javaPrimitiveType!!)
             val setTouch = lgClass.getMethod("setTouchEffectEnabled", Boolean::class.javaPrimitiveType!!)
+            val bind = lgClass.getMethod("bind", ViewGroup::class.java)
 
-            val cornerPx = settings.cornerRadius * density
-            setCornerRadius.invoke(lgView, cornerPx)
-
-            val refHeightPx = settings.refractionHeight * density
-            setRefractionHeight.invoke(lgView, refHeightPx)
-
-            val refOffsetPx = settings.refractionOffset * density
-            setRefractionOffset.invoke(lgView, refOffsetPx)
-
-            val dispersion = settings.dispersion.toFloat() / 100f
-            setDispersion.invoke(lgView, dispersion)
-
+            setCornerRadius.invoke(lgView, settings.cornerRadius * density)
+            setRefractionHeight.invoke(lgView, settings.refractionHeight * density)
+            setRefractionOffset.invoke(lgView, settings.refractionOffset * density)
+            setDispersion.invoke(lgView, settings.dispersion.toFloat() / 100f)
             setBlurRadius.invoke(lgView, settings.blurRadius.toFloat())
-
-            val tintA = settings.tintAlpha.toFloat() / 100f
-            setTintAlpha.invoke(lgView, tintA)
-
+            setTintAlpha.invoke(lgView, settings.tintAlpha.toFloat() / 100f)
             setDraggable.invoke(lgView, false)
             setElastic.invoke(lgView, false)
             setTouch.invoke(lgView, false)
 
-            val viewClass = Class.forName("android.view.View")
-            if (!viewClass.isInstance(lgView)) {
-                XposedBridge.log("$TAG: LiquidGlassView is not a View")
-                return false
-            }
-            val lv = lgView as android.view.View
-            lv.layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
+            // 6. Add LiquidGlassView ON TOP of card (index 1, drawn last)
+            wrapper.addView(lgView)
 
-            lv.isClickable = false
-            lv.isFocusable = false
-            lv.isEnabled = false
+            // 7. Insert wrapper back into parent at original position
+            parent.addView(wrapper, cardIndex)
 
-            if (surface is ViewGroup) {
-                surface.addView(lv, 0)
-                val source = surface.parent as? ViewGroup ?: (surface.rootView as? ViewGroup) ?: surface
-                bind.invoke(lgView, source)
-                XposedBridge.log("$TAG: LiquidGlassView added to ${surface.javaClass.simpleName}, bound to ${source.javaClass.simpleName}")
-            } else if (surface.parent is ViewGroup) {
-                val parent = surface.parent as ViewGroup
-                parent.addView(lv, parent.indexOfChild(surface))
-                val source = surface.rootView as? ViewGroup ?: parent
-                bind.invoke(lgView, source)
-                XposedBridge.log("$TAG: LiquidGlassView added before ${surface.javaClass.simpleName}, bound to ${source.javaClass.simpleName}")
-            } else {
-                XposedBridge.log("$TAG: Cannot find parent for ${surface.javaClass.simpleName}")
-                return false
-            }
+            // 8. Card background transparent — reveals dimmed content behind
+            card.background = null
 
-            XposedBridge.log("$TAG: LiquidGlassView applied to ${surface.javaClass.simpleName}")
+            // 9. Bind LiquidGlassView to the card content
+            bind.invoke(lgView, card)
+
+            XposedBridge.log("$TAG: LiquidGlassView power menu — sibling overlay, bound to card")
             true
         } catch (e: UnsatisfiedLinkError) {
             XposedBridge.log("$TAG: LiquidGlass native libs failed: ${e.message}")
@@ -96,7 +95,7 @@ object LiquidGlassHook {
             XposedBridge.log("$TAG: LiquidGlassView not found: ${e.message}")
             false
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: LiquidGlassView error on ${surface.javaClass.simpleName}: ${e.message}")
+            XposedBridge.log("$TAG: LiquidGlassView error on power menu: ${e.message}")
             XposedBridge.log(e)
             false
         }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="card_corner_radius">36dp</dimen>
+    <dimen name="item_corner_radius">14dp</dimen>
+    <dimen name="header_corner_radius">16dp</dimen>
+    <dimen name="footer_corner_radius">16dp</dimen>
+    <dimen name="ongoing_corner_radius">16dp</dimen>
+    <dimen name="icon_size">52dp</dimen>
+    <dimen name="icon_padding">14dp</dimen>
+    <dimen name="card_padding_top">24dp</dimen>
+    <dimen name="card_padding_side">20dp</dimen>
+    <dimen name="card_padding_bottom">24dp</dimen>
+    <dimen name="item_padding">6dp</dimen>
+    <dimen name="tile_corner_radius">20dp</dimen>
+</resources>

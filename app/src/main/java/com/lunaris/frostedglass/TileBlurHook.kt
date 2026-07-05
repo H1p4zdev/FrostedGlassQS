@@ -16,6 +16,7 @@ import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import com.lunaris.frostedglass.HookEntry.ModuleRes
 import java.io.File
 
 object TileBlurHook {
@@ -135,8 +136,8 @@ object TileBlurHook {
                             val settings = readSettings()
                             if (!settings.enabled) return
                             val panel = param.thisObject as View
-                            applyPanelEffect(panel, settings, moduleLoader)
-                            walkAndApplyTiles(panel, settings, moduleLoader)
+                            applyPanelEffect(panel, settings)
+                            walkAndApplyTiles(panel, settings)
                         }
                     }
                 )
@@ -171,22 +172,16 @@ object TileBlurHook {
                             val getWindow = dialog.javaClass.getMethod("getWindow")
                             val window = getWindow.invoke(dialog) as? Window ?: return
 
-                            // If liquid glass is enabled, DON'T add FLAG_BLUR_BEHIND
-                            // (LiquidGlassView handles its own sampling)
                             if (settings.liquidGlass) {
-                                // Keep window transparent, no system blur
                                 window.setDimAmount(0.7f)
                                 window.setBackgroundDrawable(null)
                                 XposedBridge.log("$TAG: Power menu window setup (liquid glass mode)")
                             } else {
-                                // Heavy blur behind (like iOS)
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                     window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
                                     window.attributes.blurBehindRadius = 120
                                 }
-                                // Dark dim
                                 window.setDimAmount(0.7f)
-                                // Transparent window background (removes ScrimDrawable)
                                 window.setBackgroundDrawable(null)
                                 XposedBridge.log("$TAG: Power menu OEM window setup done")
                             }
@@ -231,31 +226,22 @@ object TileBlurHook {
     private fun applyPowerMenuOemStyle(layout: ViewGroup, settings: FrostedSettings, moduleLoader: ClassLoader) {
         try {
             val density = layout.resources.displayMetrics.density
-            val cardBgColor = 0xE00F0F1E.toInt()  // dark glass card
-            val cardCorner = (36 * density).toInt()
 
             // Find the card container via getListView()
             val listView = XposedHelpers.callMethod(layout, "getListView") as? ViewGroup ?: return
 
-            // === 1. CARD BACKGROUND ===
+            // === 1. LIQUID GLASS OR CARD BACKGROUND ===
             if (settings.liquidGlass) {
-                val lgSuccess = LiquidGlassHook.applyToSurface(listView, settings, moduleLoader)
+                val lgSuccess = LiquidGlassHook.applyToPowerMenu(listView, settings, moduleLoader)
                 if (lgSuccess) {
-                    XposedBridge.log("$TAG: LiquidGlassView applied to power menu")
+                    XposedBridge.log("$TAG: LiquidGlassView applied to power menu via sibling overlay")
                 } else {
-                    XposedBridge.log("$TAG: LiquidGlassView failed, using fallback")
-                    listView.background = GradientDrawable().apply {
-                        shape = GradientDrawable.RECTANGLE
-                        setCornerRadius(cardCorner.toFloat())
-                        setColor(cardBgColor)
-                    }
+                    // Fallback: XML drawable
+                    listView.background = ModuleRes.resources.getDrawable(R.drawable.power_menu_card_bg)
+                    XposedBridge.log("$TAG: LiquidGlassView failed, using XML drawable fallback")
                 }
             } else {
-                listView.background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    setCornerRadius(cardCorner.toFloat())
-                    setColor(cardBgColor)
-                }
+                listView.background = ModuleRes.resources.getDrawable(R.drawable.power_menu_card_bg)
             }
 
             // Add internal padding for items
@@ -267,11 +253,6 @@ object TileBlurHook {
             )
 
             // === 2. STYLE EACH ACTION ITEM ===
-            val icons = arrayOf(
-                "ic_power", "ic_restart", "ic_screenshot", "ic_emergency",
-                "ic_lock", "ic_airplane", "ic_settings", "ic_user"
-            )
-
             walkViews(listView) { child ->
                 if (child.javaClass.name.contains("GlobalActionsItem")) {
                     val item = child as ViewGroup
@@ -301,12 +282,10 @@ object TileBlurHook {
                             else -> 0xFF6C63FF.toInt()
                         }
 
-                        // Modern glass button background
-                        icon.background = GradientDrawable().apply {
-                            shape = GradientDrawable.RECTANGLE
-                            setCornerRadius(iconCorner.toFloat())
-                            setColor(accentColor and 0x66FFFFFF.toInt() or 0x22000000.toInt())
-                        }
+                        // Load base item drawable from XML and tint it
+                        val baseDrawable = ModuleRes.resources.getDrawable(R.drawable.power_menu_item_bg)
+                        baseDrawable.setTint(accentColor)
+                        icon.background = baseDrawable
 
                         // Larger icon, white tinted
                         icon.layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
@@ -344,8 +323,6 @@ object TileBlurHook {
     // ==================== LOCKSCREEN ====================
 
     fun hookLockscreen(classLoader: ClassLoader) {
-        val moduleLoader = TileBlurHook::class.java.classLoader
-
         try {
             val statusBarClass = XposedHelpers.findClass(
                 "com.android.systemui.statusbar.phone.KeyguardStatusBarView", classLoader
@@ -356,7 +333,7 @@ object TileBlurHook {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val settings = readSettings()
                         if (!settings.enabled || !settings.lockscreen) return
-                        applyLockscreenHeaderEffect(param.thisObject as View, settings, moduleLoader)
+                        applyLockscreenHeaderEffect(param.thisObject as View, settings)
                     }
                 }
             )
@@ -375,7 +352,7 @@ object TileBlurHook {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val settings = readSettings()
                         if (!settings.enabled || !settings.lockscreen) return
-                        applyLockscreenFooterEffect(param.thisObject as View, settings, moduleLoader)
+                        applyLockscreenFooterEffect(param.thisObject as View, settings)
                     }
                 }
             )
@@ -403,7 +380,7 @@ object TileBlurHook {
                         walkViews(root) { child ->
                             val cn = child.javaClass.name
                             if (cn.contains("KeyguardStatusBar") || cn.contains("IndicationArea")) {
-                                applyFrostedBackground(child, settings, moduleLoader)
+                                applyFrostedBackground(child, settings)
                             }
                             false
                         }
@@ -416,59 +393,63 @@ object TileBlurHook {
         }
     }
 
-    private fun applyLockscreenHeaderEffect(view: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
+    private fun applyLockscreenHeaderEffect(view: View, settings: FrostedSettings) {
         try {
-            if (settings.liquidGlass && view is ViewGroup) {
-                if (LiquidGlassHook.applyToSurface(view, settings, moduleLoader)) return
+            if (view is ViewGroup) {
+                view.background = ModuleRes.resources.getDrawable(R.drawable.lockscreen_header_bg)
+                XposedBridge.log("$TAG: Lockscreen header styled via XML drawable")
+            } else {
+                view.setBackgroundColor(0x18FFFFFF.toInt())
+                XposedBridge.log("$TAG: Lockscreen header styled (fallback)")
             }
-            view.setBackgroundColor(0x18FFFFFF.toInt())
-            XposedBridge.log("$TAG: Lockscreen header styled")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: Lockscreen header error: ${e.message}")
         }
     }
 
-    private fun applyLockscreenFooterEffect(view: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
+    private fun applyLockscreenFooterEffect(view: View, settings: FrostedSettings) {
         try {
-            if (settings.liquidGlass && view is ViewGroup) {
-                if (LiquidGlassHook.applyToSurface(view, settings, moduleLoader)) return
+            if (view is ViewGroup) {
+                view.background = ModuleRes.resources.getDrawable(R.drawable.lockscreen_footer_bg)
+                XposedBridge.log("$TAG: Lockscreen footer styled via XML drawable")
+            } else {
+                val density = view.resources.displayMetrics.density
+                val opacity = settings.tileOpacity.toFloat() / 100f
+                val bgColor = ((255 * opacity * 0.5f).toInt() shl 24) or 0x1A1A2E
+                val cornerRadius = settings.cornerRadius * density
+                view.background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setCornerRadius(cornerRadius)
+                    setColor(bgColor)
+                }
+                XposedBridge.log("$TAG: Lockscreen footer styled (fallback)")
             }
-            val density = view.resources.displayMetrics.density
-            val opacity = settings.tileOpacity.toFloat() / 100f
-            val bgColor = ((255 * opacity * 0.5f).toInt() shl 24) or 0x1A1A2E
-            val cornerRadius = settings.cornerRadius * density
-
-            view.background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                setCornerRadius(cornerRadius)
-                setColor(bgColor)
-            }
-            XposedBridge.log("$TAG: Lockscreen footer styled")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: Lockscreen footer error: ${e.message}")
         }
     }
 
-    private fun applyFrostedBackground(view: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
+    private fun applyFrostedBackground(view: View, settings: FrostedSettings) {
         try {
-            if (settings.liquidGlass && view is ViewGroup) {
-                if (LiquidGlassHook.applyToSurface(view, settings, moduleLoader)) return
-            }
-            val density = view.resources.displayMetrics.density
-            val bgColor = 0x10FFFFFF
-            val cornerRadius = settings.cornerRadius * density
-            view.background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                setCornerRadius(cornerRadius)
-                setColor(bgColor)
-            }
-        } catch (_: Throwable) {}
+            view.background = ModuleRes.resources.getDrawable(R.drawable.lockscreen_ongoing_bg)
+            XposedBridge.log("$TAG: Lockscreen frosted background via XML drawable")
+        } catch (_: Throwable) {
+            try {
+                val density = view.resources.displayMetrics.density
+                val bgColor = 0x10FFFFFF
+                val cornerRadius = settings.cornerRadius * density
+                view.background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setCornerRadius(cornerRadius)
+                    setColor(bgColor)
+                }
+            } catch (_: Throwable) {}
+        }
     }
 
-    // ==================== DIALOGS ====================
+    // ==================== DIALOGS (stub — future use) ====================
 
     fun hookDialogs(classLoader: ClassLoader) {
-        val moduleLoader = TileBlurHook::class.java.classLoader
         try {
             XposedHelpers.findAndHookMethod(
                 "android.app.Dialog", classLoader, "show",
@@ -479,15 +460,14 @@ object TileBlurHook {
                             val window = dialog.javaClass.getMethod("getWindow").invoke(dialog) as? Window ?: return
                             val ctx = window.context ?: return
                             if (ctx.packageName != "com.android.systemui") return
-                            val view = window.decorView as? ViewGroup ?: return
                             val settings = readSettings()
-                            if (!settings.enabled || !settings.liquidGlass) return
-                            LiquidGlassHook.applyToSurface(view, settings, moduleLoader)
+                            if (!settings.enabled) return
+                            // Future: add simulated frosted glass to dialogs
                         } catch (_: Throwable) {}
                     }
                 }
             )
-            XposedBridge.log("$TAG: Hooked Dialog.show()")
+            XposedBridge.log("$TAG: Hooked Dialog.show() (passive)")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: Dialog hook failed: ${e.message}")
         }
@@ -504,7 +484,7 @@ object TileBlurHook {
         }
     }
 
-    private fun walkAndApplyTiles(view: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
+    private fun walkAndApplyTiles(view: View, settings: FrostedSettings) {
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
                 val child = view.getChildAt(i)
@@ -513,17 +493,14 @@ object TileBlurHook {
                     applyTileEffect(child, settings)
                 }
                 if (child is ViewGroup) {
-                    walkAndApplyTiles(child, settings, moduleLoader)
+                    walkAndApplyTiles(child, settings)
                 }
             }
         }
     }
 
-    private fun applyPanelEffect(panel: View, settings: FrostedSettings, moduleLoader: ClassLoader) {
+    private fun applyPanelEffect(panel: View, settings: FrostedSettings) {
         if (!settings.panelBlur) return
-        if (settings.liquidGlass && panel is ViewGroup) {
-            if (LiquidGlassHook.applyToSurface(panel, settings, moduleLoader)) return
-        }
         try {
             panel.setBackgroundColor(0x08000000.toInt())
         } catch (_: Throwable) {}
