@@ -1,8 +1,11 @@
 package com.lunaris.frostedglass
 
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.view.View
+import android.view.ViewRootImpl
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -11,120 +14,153 @@ object TileBlurHook {
 
     private const val TAG = "FrostedGlassQS"
 
-    private val TILE_VIEW_CLASSES = listOf(
-        "com.android.systemui.qs.tileimpl.QSTileViewImpl",
-        "com.android.systemui.qs.tileimpl.QSTileView",
-        "com.android.systemui.qs.tileimpl.QSIconViewImpl"
-    )
+    // Correct class names from Lunaris AOSP source
+    private const val TILE_VIEW_IMPL = "com.android.systemui.qs.tileimpl.QSTileViewImpl"
+    private const val QS_PANEL = "com.android.systemui.qs.QSPanel"
+    private const val QS_PANEL_CONTROLLER_BASE = "com.android.systemui.qs.QSPanelControllerBase"
 
-    private val PANEL_CLASSES = listOf(
-        "com.android.systemui.qs.QSPanel",
-        "com.android.systemui.qs.QSPanelController",
-        "com.android.systemui.qs.QSPanelControllerBase"
-    )
+    // Reflection caches
+    private var viewRootImplField: java.lang.reflect.Field? = null
+    private var blurUtilsClass: Class<*>? = null
+    private var blurUtilsInstance: Any? = null
+    private var applyBlurMethod: java.lang.reflect.Method? = null
 
-    // Cached method reference for setBackgroundBlurRadius
-    private var blurMethod: java.lang.reflect.Method? = null
-    private var blurMethodInitialized = false
-
-    private fun getBlurMethod(): java.lang.reflect.Method? {
-        if (blurMethodInitialized) return blurMethod
-        blurMethodInitialized = true
+    private fun initReflections(classLoader: ClassLoader) {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                blurMethod = View::class.java.getMethod(
-                    "setBackgroundBlurRadius",
-                    Int::class.javaPrimitiveType
-                )
-            }
+            // ViewRootImpl field
+            viewRootImplField = View::class.java.getDeclaredField("mViewRootImpl")
+            viewRootImplField?.isAccessible = true
+
+            // BlurUtils singleton
+            blurUtilsClass = XposedHelpers.findClass(
+                "com.android.systemui.statusbar.BlurUtils", classLoader
+            )
+            val getInstanceMethod = blurUtilsClass?.getDeclaredMethod("getBlurUtilsInstance")
+            blurUtilsInstance = getInstanceMethod?.invoke(null)
+
+            // applyBlur method
+            applyBlurMethod = blurUtilsClass?.getDeclaredMethod(
+                "applyBlur",
+                ViewRootImpl::class.java,
+                Int::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType
+            )
+
+            XposedBridge.log("$TAG: Reflections initialized successfully")
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: Could not find setBackgroundBlurRadius: ${e.message}")
+            XposedBridge.log("$TAG: Error initializing reflections: ${e.message}")
         }
-        return blurMethod
     }
 
-    private fun applyBlur(view: View, radius: Int) {
+    private fun getViewRootImpl(view: View): ViewRootImpl? {
+        return try {
+            viewRootImplField?.get(view) as? ViewRootImpl
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    private fun applyBlurToWindow(view: View, radius: Int) {
         try {
-            val method = getBlurMethod()
-            if (method != null) {
-                method.invoke(view, radius)
-                XposedBridge.log("$TAG: Applied blur radius $radius via reflection")
-            } else {
-                XposedBridge.log("$TAG: setBackgroundBlurRadius not available")
-            }
+            val viewRoot = getViewRootImpl(view) ?: return
+            val blurUtils = blurUtilsInstance ?: return
+            val method = applyBlurMethod ?: return
+
+            method.invoke(blurUtils, viewRoot, radius, false)
+            XposedBridge.log("$TAG: Applied blur radius $radius to window")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: Error applying blur: ${e.message}")
         }
     }
 
     fun hookTiles(classLoader: ClassLoader) {
-        for (className in TILE_VIEW_CLASSES) {
-            try {
-                val tileClass = XposedHelpers.findClass(className, classLoader)
+        initReflections(classLoader)
 
-                XposedHelpers.findAndHookMethod(
-                    tileClass,
-                    "onFinishInflate",
-                    object : XC_MethodHook() {
-                        override fun afterHookedMethod(param: MethodHookParam) {
-                            applyFrostedEffect(param.thisObject as View)
-                        }
+        try {
+            val tileViewClass = XposedHelpers.findClass(TILE_VIEW_IMPL, classLoader)
+
+            // Hook init(QSTile) - called when tile is initialized
+            XposedHelpers.findAndHookMethod(
+                tileViewClass,
+                "init",
+                XposedHelpers.findClass("com.android.systemui.plugins.qs.QSTile", classLoader),
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val view = param.thisObject as View
+                        applyFrostedEffect(view)
                     }
-                )
+                }
+            )
 
-                XposedBridge.log("$TAG: Hooked $className")
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG: Could not hook $className: ${e.message}")
-            }
+            XposedBridge.log("$TAG: Hooked $TILE_VIEW_IMPL.init()")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG: Error hooking tiles: ${e.message}")
+            XposedBridge.log(e)
         }
     }
 
     fun hookPanel(classLoader: ClassLoader) {
-        for (className in PANEL_CLASSES) {
-            try {
-                val panelClass = XposedHelpers.findClass(className, classLoader)
+        try {
+            val panelClass = XposedHelpers.findClass(QS_PANEL, classLoader)
 
-                XposedHelpers.findAndHookMethod(
-                    panelClass,
-                    "onLayout",
-                    Boolean::class.java,
-                    Int::class.java,
-                    Int::class.java,
-                    Int::class.java,
-                    Int::class.java,
-                    object : XC_MethodHook() {
-                        override fun afterHookedMethod(param: MethodHookParam) {
-                            applyPanelEffect(param.thisObject as View)
-                        }
+            // Hook onLayout
+            XposedHelpers.findAndHookMethod(
+                panelClass,
+                "onLayout",
+                Boolean::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val view = param.thisObject as View
+                        applyPanelEffect(view)
                     }
-                )
+                }
+            )
 
-                XposedBridge.log("$TAG: Hooked $className")
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG: Could not hook $className: ${e.message}")
-            }
+            XposedBridge.log("$TAG: Hooked $QS_PANEL.onLayout()")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG: Error hooking panel: ${e.message}")
         }
     }
 
+    /**
+     * Apply frosted glass effect to a QS tile
+     */
     private fun applyFrostedEffect(view: View) {
         try {
             val density = view.resources.displayMetrics.density
 
-            // 1. Translucent background
-            val bgDrawable = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 20f * density
-                setColor(0x40FFFFFF.toInt())
-                setStroke((1 * density).toInt(), 0x20FFFFFF.toInt())
+            // 1. Get the background drawable and make it translucent
+            val bg = view.background
+            if (bg is RippleDrawable) {
+                // Find the background layer
+                val backgroundLayer = bg.findDrawableByLayerId(
+                    view.resources.getIdentifier("background", "id", "android")
+                ) ?: bg.findDrawableByLayerId(
+                    view.resources.getIdentifier("background", "id", view.context.packageName)
+                )
+
+                if (backgroundLayer is LayerDrawable) {
+                    // Find the base background shape
+                    val baseId = view.resources.getIdentifier(
+                        "qs_tile_background_base", "id", view.context.packageName
+                    )
+                    val baseDrawable = backgroundLayer.findDrawableByLayerId(baseId)
+                    if (baseDrawable is GradientDrawable) {
+                        // Make it translucent
+                        baseDrawable.setColor(0x30FFFFFF.toInt()) // ~19% white
+                    }
+                }
+            } else if (bg is GradientDrawable) {
+                bg.setColor(0x30FFFFFF.toInt())
             }
-            view.background = bgDrawable
 
-            // 2. Rounded corners
-            view.clipToOutline = true
-
-            // 3. Background blur via reflection (API 31+)
+            // 2. Apply blur to the tile's window
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                applyBlur(view, 25)
+                applyBlurToWindow(view, 20)
             }
 
             XposedBridge.log("$TAG: Applied frosted effect to tile")
@@ -134,18 +170,17 @@ object TileBlurHook {
         }
     }
 
+    /**
+     * Apply frosted glass effect to the QS panel
+     */
     private fun applyPanelEffect(view: View) {
         try {
-            view.setBackgroundColor(0x1A000000.toInt())
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                applyBlur(view, 15)
-            }
+            // Make panel background semi-transparent
+            view.setBackgroundColor(0x10000000.toInt()) // ~6% black
 
             XposedBridge.log("$TAG: Applied frosted effect to panel")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: Error applying panel effect: ${e.message}")
-            XposedBridge.log(e)
         }
     }
 }
