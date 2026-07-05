@@ -29,6 +29,11 @@ class MainActivity : AppCompatActivity() {
         const val KEY_CORNER_RADIUS = "corner_radius"
         const val KEY_POWER_MENU = "power_menu"
         const val KEY_LOCKSCREEN = "lockscreen"
+        const val KEY_LIQUID_GLASS = "liquid_glass"
+        const val KEY_REFRACTION_HEIGHT = "refraction_height"
+        const val KEY_REFRACTION_OFFSET = "refraction_offset"
+        const val KEY_DISPERSION = "dispersion"
+        const val KEY_TINT_ALPHA = "tint_alpha"
         const val SHARED_PATH = "/data/local/tmp/frosted_glass_qs.xml"
 
         fun getPrefs(context: Context) =
@@ -160,6 +165,38 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { setMargins(0, dp(8), 0, dp(8)) }
+        })
+
+        // === LIQUID GLASS SECTION ===
+        content.addView(sectionHeader("Liquid Glass (Power Menu)"))
+
+        content.addView(Switch(this).apply {
+            text = "Liquid Glass Effect"
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            isChecked = prefs.getBoolean(KEY_LIQUID_GLASS, false)
+            setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
+                prefs.edit().putBoolean(KEY_LIQUID_GLASS, isChecked).apply()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(8), 0, dp(8)) }
+        })
+
+        content.addView(createSlider("Refraction Height", prefs.getInt(KEY_REFRACTION_HEIGHT, 20), 0, 50) { v ->
+            prefs.edit().putInt(KEY_REFRACTION_HEIGHT, v).apply()
+        })
+
+        content.addView(createSlider("Refraction Offset", prefs.getInt(KEY_REFRACTION_OFFSET, 70), 0, 120) { v ->
+            prefs.edit().putInt(KEY_REFRACTION_OFFSET, v).apply()
+        })
+
+        content.addView(createSlider("Dispersion", prefs.getInt(KEY_DISPERSION, 50), 0, 100) { v ->
+            prefs.edit().putInt(KEY_DISPERSION, v).apply()
+        })
+
+        content.addView(createSlider("Tint Alpha", prefs.getInt(KEY_TINT_ALPHA, 0), 0, 30) { v ->
+            prefs.edit().putInt(KEY_TINT_ALPHA, v).apply()
         })
 
         // === LOCKSCREEN SECTION ===

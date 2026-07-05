@@ -30,7 +30,12 @@ object TileBlurHook {
         val panelBlur: Boolean = true,
         val cornerRadius: Int = 20,
         val powerMenu: Boolean = true,
-        val lockscreen: Boolean = true
+        val lockscreen: Boolean = true,
+        val liquidGlass: Boolean = false,
+        val refractionHeight: Int = 20,
+        val refractionOffset: Int = 70,
+        val dispersion: Int = 50,
+        val tintAlpha: Int = 0
     )
 
     private fun readSettings(): FrostedSettings {
@@ -45,7 +50,12 @@ object TileBlurHook {
                 panelBlur = parseBool(xml, "panel_blur", true),
                 cornerRadius = parseInt(xml, "corner_radius", 20),
                 powerMenu = parseBool(xml, "power_menu", true),
-                lockscreen = parseBool(xml, "lockscreen", true)
+                lockscreen = parseBool(xml, "lockscreen", true),
+                liquidGlass = parseBool(xml, "liquid_glass", false),
+                refractionHeight = parseInt(xml, "refraction_height", 20),
+                refractionOffset = parseInt(xml, "refraction_offset", 70),
+                dispersion = parseInt(xml, "dispersion", 50),
+                tintAlpha = parseInt(xml, "tint_alpha", 0)
             )
         } catch (e: Throwable) {
             FrostedSettings()
@@ -141,6 +151,8 @@ object TileBlurHook {
     // ========================================================================
 
     fun hookPowerMenu(classLoader: ClassLoader) {
+        val moduleLoader = TileBlurHook::class.java.classLoader
+
         // Hook initializeLayout for window-level blur + dim
         try {
             val dialogClass = XposedHelpers.findClass(
@@ -158,19 +170,25 @@ object TileBlurHook {
                             val getWindow = dialog.javaClass.getMethod("getWindow")
                             val window = getWindow.invoke(dialog) as? Window ?: return
 
-                            // Heavy blur behind (like iOS)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                                window.attributes.blurBehindRadius = 120
+                            // If liquid glass is enabled, DON'T add FLAG_BLUR_BEHIND
+                            // (LiquidGlassView handles its own sampling)
+                            if (settings.liquidGlass) {
+                                // Keep window transparent, no system blur
+                                window.setDimAmount(0.7f)
+                                window.setBackgroundDrawable(null)
+                                XposedBridge.log("$TAG: Power menu window setup (liquid glass mode)")
+                            } else {
+                                // Heavy blur behind (like iOS)
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                                    window.attributes.blurBehindRadius = 120
+                                }
+                                // Dark dim
+                                window.setDimAmount(0.7f)
+                                // Transparent window background (removes ScrimDrawable)
+                                window.setBackgroundDrawable(null)
+                                XposedBridge.log("$TAG: Power menu OEM window setup done")
                             }
-
-                            // Dark dim
-                            window.setDimAmount(0.7f)
-
-                            // Transparent window background (removes ScrimDrawable)
-                            window.setBackgroundDrawable(null)
-
-                            XposedBridge.log("$TAG: Power menu OEM window setup done")
                         } catch (e: Throwable) {
                             XposedBridge.log("$TAG: Power menu window error: ${e.message}")
                         }
@@ -199,7 +217,7 @@ object TileBlurHook {
                         val settings = readSettings()
                         if (!settings.enabled || !settings.powerMenu) return
                         val layout = param.thisObject as ViewGroup
-                        applyPowerMenuOemStyle(layout, settings)
+                        applyPowerMenuOemStyle(layout, settings, moduleLoader)
                     }
                 }
             )
@@ -209,7 +227,7 @@ object TileBlurHook {
         }
     }
 
-    private fun applyPowerMenuOemStyle(layout: ViewGroup, settings: FrostedSettings) {
+    private fun applyPowerMenuOemStyle(layout: ViewGroup, settings: FrostedSettings, moduleLoader: ClassLoader) {
         try {
             val density = layout.resources.displayMetrics.density
             val cardBgColor = 0xE00F0F1E.toInt()  // dark glass card
@@ -219,12 +237,29 @@ object TileBlurHook {
             val listView = XposedHelpers.callMethod(layout, "getListView") as? ViewGroup ?: return
 
             // === 1. CARD BACKGROUND ===
-            // Replace with dark glass card
-            listView.background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                setCornerRadius(cardCorner.toFloat())
-                setColor(cardBgColor)
+            if (settings.liquidGlass) {
+                // Try LiquidGlassView — if it succeeds, it replaces the background
+                val lgSuccess = LiquidGlassHook.applyToPowerMenu(listView, settings, moduleLoader)
+                if (lgSuccess) {
+                    XposedBridge.log("$TAG: LiquidGlassView applied to power menu")
+                    // Do NOT set GradientDrawable background — LiquidGlassView handles it
+                } else {
+                    XposedBridge.log("$TAG: LiquidGlassView failed, using fallback GradientDrawable")
+                    listView.background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        setCornerRadius(cardCorner.toFloat())
+                        setColor(cardBgColor)
+                    }
+                }
+            } else {
+                // Original OEM approach: dark glass card
+                listView.background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setCornerRadius(cardCorner.toFloat())
+                    setColor(cardBgColor)
+                }
             }
+
             // Add internal padding for items
             listView.setPadding(
                 (20 * density).toInt(),
