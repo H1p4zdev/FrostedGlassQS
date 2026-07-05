@@ -1,24 +1,28 @@
 package com.lunaris.frostedglass
 
-import android.content.Context
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
+import android.provider.Settings
 import android.view.View
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
-import java.io.File
 
 object TileBlurHook {
 
     private const val TAG = "FrostedGlassQS"
-    private const val PREFS_NAME = "frosted_glass_prefs"
 
     private const val TILE_VIEW_IMPL = "com.android.systemui.qs.tileimpl.QSTileViewImpl"
     private const val QS_PANEL = "com.android.systemui.qs.QSPanel"
     private const val QSTILE_PLUGIN = "com.android.systemui.plugins.qs.QSTile"
+
+    private const val KEY_ENABLED = "frosted_glass_enabled"
+    private const val KEY_BLUR_RADIUS = "frosted_glass_blur_radius"
+    private const val KEY_TILE_OPACITY = "frosted_glass_tile_opacity"
+    private const val KEY_PANEL_BLUR = "frosted_glass_panel_blur"
+    private const val KEY_CORNER_RADIUS = "frosted_glass_corner_radius"
 
     private var viewRootImplField: java.lang.reflect.Field? = null
     private var blurUtilsClass: Class<*>? = null
@@ -73,40 +77,20 @@ object TileBlurHook {
         }
     }
 
-    /**
-     * Read settings from SharedPreferences.
-     * SystemUI process can read files from the module's data directory
-     * via MODE_WORLD_READABLE.
-     */
     private fun readSettings(view: View): FrostedSettings {
         return try {
             val ctx = view.context
-            val prefsFile = java.io.File(
-                "/data/data/${ctx.packageName}/shared_prefs/$PREFS_NAME.xml"
-            )
+            val resolver = ctx.contentResolver
 
-            // Try reading the module's prefs from systemui context
-            // Falls back to Xposed module's own prefs
-            val moduleCtx = try {
-                val appCtx = ctx.createPackageContext(
-                    "com.lunaris.frostedglass",
-                    Context.CONTEXT_IGNORE_SECURITY
-                )
-                appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_WORLD_READABLE)
-            } catch (e: Throwable) {
-                // Direct file read as fallback
-                null
-            }
-
-            val enabled = moduleCtx?.getBoolean("enabled", true) ?: true
-            val blurRadius = moduleCtx?.getInt("blur_radius", 20) ?: 20
-            val tileOpacity = moduleCtx?.getInt("tile_opacity", 19) ?: 19
-            val panelBlur = moduleCtx?.getBoolean("panel_blur", true) ?: true
-            val cornerRadius = moduleCtx?.getInt("corner_radius", 20) ?: 20
+            val enabled = Settings.Global.getInt(resolver, KEY_ENABLED, 1) == 1
+            val blurRadius = Settings.Global.getInt(resolver, KEY_BLUR_RADIUS, 20)
+            val tileOpacity = Settings.Global.getInt(resolver, KEY_TILE_OPACITY, 19)
+            val panelBlur = Settings.Global.getInt(resolver, KEY_PANEL_BLUR, 1) == 1
+            val cornerRadius = Settings.Global.getInt(resolver, KEY_CORNER_RADIUS, 20)
 
             FrostedSettings(enabled, blurRadius, tileOpacity, panelBlur, cornerRadius)
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: Could not read prefs, using defaults: ${e.message}")
+            XposedBridge.log("$TAG: Could not read settings, using defaults: ${e.message}")
             FrostedSettings()
         }
     }
@@ -184,7 +168,6 @@ object TileBlurHook {
             val bgColor = ((255 * opacity).toInt() shl 24) or 0xFFFFFF
             val cornerRadius = settings.cornerRadius * density
 
-            // Modify tile background
             val bg = view.background
             if (bg is RippleDrawable) {
                 try {
@@ -208,7 +191,6 @@ object TileBlurHook {
                 }
             }
 
-            // Apply blur to window
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && settings.blurRadius > 0) {
                 applyBlurToView(view, settings.blurRadius)
             }

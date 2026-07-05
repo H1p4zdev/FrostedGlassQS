@@ -1,10 +1,10 @@
 package com.lunaris.frostedglass
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -18,25 +18,34 @@ import androidx.appcompat.app.AppCompatActivity
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        const val PREFS_NAME = "frosted_glass_prefs"
-        const val KEY_ENABLED = "enabled"
-        const val KEY_BLUR_RADIUS = "blur_radius"
-        const val KEY_TILE_OPACITY = "tile_opacity"
-        const val KEY_PANEL_BLUR = "panel_blur"
-        const val KEY_CORNER_RADIUS = "corner_radius"
+        const val KEY_ENABLED = "frosted_glass_enabled"
+        const val KEY_BLUR_RADIUS = "frosted_glass_blur_radius"
+        const val KEY_TILE_OPACITY = "frosted_glass_tile_opacity"
+        const val KEY_PANEL_BLUR = "frosted_glass_panel_blur"
+        const val KEY_CORNER_RADIUS = "frosted_glass_corner_radius"
 
-        fun getPrefs(context: Context): SharedPreferences {
-            return context.getSharedPreferences(PREFS_NAME, Context.MODE_WORLD_READABLE)
+        fun putInt(ctx: Context, key: String, value: Int) {
+            Settings.Global.putInt(ctx.contentResolver, key, value)
+        }
+
+        fun putBool(ctx: Context, key: String, value: Boolean) {
+            Settings.Global.putInt(ctx.contentResolver, key, if (value) 1 else 0)
+        }
+
+        fun getInt(ctx: Context, key: String, default: Int): Int {
+            return Settings.Global.getInt(ctx.contentResolver, key, default)
+        }
+
+        fun getBool(ctx: Context, key: String, default: Boolean): Boolean {
+            val v = Settings.Global.getInt(ctx.contentResolver, key, if (default) 1 else 0)
+            return v == 1
         }
     }
 
-    private lateinit var prefs: SharedPreferences
     private var previewContainerId = View.generateViewId()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        prefs = getPrefs(this)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -48,7 +57,6 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        // Title
         root.addView(TextView(this).apply {
             text = "Frosted Glass QS"
             setTextColor(Color.WHITE)
@@ -65,14 +73,13 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 0, 0, dp(24))
         })
 
-        // Master toggle
         val enabledSwitch = Switch(this).apply {
             text = "Enable Frosted Glass"
             setTextColor(Color.WHITE)
             textSize = 16f
-            isChecked = prefs.getBoolean(KEY_ENABLED, true)
+            isChecked = getBool(this@MainActivity, KEY_ENABLED, true)
             setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
-                prefs.edit().putBoolean(KEY_ENABLED, isChecked).apply()
+                putBool(this@MainActivity, KEY_ENABLED, isChecked)
                 updatePreview()
             }
             val params = LinearLayout.LayoutParams(
@@ -84,31 +91,27 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(enabledSwitch)
 
-        // Blur radius
-        root.addView(createSlider("Tile Blur Radius", prefs.getInt(KEY_BLUR_RADIUS, 20), 0, 50) { value ->
-            prefs.edit().putInt(KEY_BLUR_RADIUS, value).apply()
+        root.addView(createSlider("Tile Blur Radius", getInt(this, KEY_BLUR_RADIUS, 20), 0, 50) { value ->
+            putInt(this, KEY_BLUR_RADIUS, value)
         })
 
-        // Tile opacity
-        root.addView(createSlider("Tile Opacity", prefs.getInt(KEY_TILE_OPACITY, 19), 0, 100) { value ->
-            prefs.edit().putInt(KEY_TILE_OPACITY, value).apply()
+        root.addView(createSlider("Tile Opacity", getInt(this, KEY_TILE_OPACITY, 19), 0, 100) { value ->
+            putInt(this, KEY_TILE_OPACITY, value)
             updatePreview()
         })
 
-        // Corner radius
-        root.addView(createSlider("Corner Radius (dp)", prefs.getInt(KEY_CORNER_RADIUS, 20), 0, 40) { value ->
-            prefs.edit().putInt(KEY_CORNER_RADIUS, value).apply()
+        root.addView(createSlider("Corner Radius (dp)", getInt(this, KEY_CORNER_RADIUS, 20), 0, 40) { value ->
+            putInt(this, KEY_CORNER_RADIUS, value)
             updatePreview()
         })
 
-        // Panel blur toggle
         val panelSwitch = Switch(this).apply {
             text = "Panel Blur"
             setTextColor(Color.WHITE)
             textSize = 16f
-            isChecked = prefs.getBoolean(KEY_PANEL_BLUR, true)
+            isChecked = getBool(this@MainActivity, KEY_PANEL_BLUR, true)
             setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
-                prefs.edit().putBoolean(KEY_PANEL_BLUR, isChecked).apply()
+                putBool(this@MainActivity, KEY_PANEL_BLUR, isChecked)
             }
             val params = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -119,7 +122,6 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(panelSwitch)
 
-        // Preview section
         root.addView(TextView(this).apply {
             text = "Preview"
             setTextColor(0x99FFFFFF.toInt())
@@ -145,7 +147,6 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(previewContainer)
 
-        // Save button
         root.addView(Button(this).apply {
             text = "Save & Reboot to Apply"
             setBackgroundColor(0xFF6C63FF.toInt())
@@ -158,13 +159,9 @@ class MainActivity : AppCompatActivity() {
                 topMargin = dp(24)
             }
             layoutParams = params
-            setOnClickListener {
-                prefs.edit().apply()
-                recreate()
-            }
+            setOnClickListener { recreate() }
         })
 
-        // Reset button
         root.addView(Button(this).apply {
             text = "Reset to Defaults"
             setBackgroundColor(0xFF333333.toInt())
@@ -178,7 +175,11 @@ class MainActivity : AppCompatActivity() {
             }
             layoutParams = params
             setOnClickListener {
-                prefs.edit().clear().apply()
+                Settings.Global.putString(contentResolver, KEY_ENABLED, null)
+                Settings.Global.putString(contentResolver, KEY_BLUR_RADIUS, null)
+                Settings.Global.putString(contentResolver, KEY_TILE_OPACITY, null)
+                Settings.Global.putString(contentResolver, KEY_PANEL_BLUR, null)
+                Settings.Global.putString(contentResolver, KEY_CORNER_RADIUS, null)
                 recreate()
             }
         })
@@ -188,9 +189,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun createPreviewTile(): View {
         val density = resources.displayMetrics.density
-        val enabled = prefs.getBoolean(KEY_ENABLED, true)
-        val opacity = prefs.getInt(KEY_TILE_OPACITY, 19)
-        val cornerRadius = prefs.getInt(KEY_CORNER_RADIUS, 20)
+        val enabled = getBool(this, KEY_ENABLED, true)
+        val opacity = getInt(this, KEY_TILE_OPACITY, 19)
+        val cornerRadius = getInt(this, KEY_CORNER_RADIUS, 20)
 
         val alpha = if (enabled) opacity.toFloat() / 100f else 1f
         val bgColor = if (enabled) {
@@ -214,9 +215,9 @@ class MainActivity : AppCompatActivity() {
     private fun updatePreview() {
         val container = findViewById<LinearLayout>(previewContainerId) ?: return
         val density = resources.displayMetrics.density
-        val enabled = prefs.getBoolean(KEY_ENABLED, true)
-        val opacity = prefs.getInt(KEY_TILE_OPACITY, 19)
-        val cornerRadius = prefs.getInt(KEY_CORNER_RADIUS, 20)
+        val enabled = getBool(this, KEY_ENABLED, true)
+        val opacity = getInt(this, KEY_TILE_OPACITY, 19)
+        val cornerRadius = getInt(this, KEY_CORNER_RADIUS, 20)
 
         val alpha = if (enabled) opacity.toFloat() / 100f else 1f
         val bgColor = if (enabled) {
